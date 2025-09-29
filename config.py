@@ -8,7 +8,7 @@ class Config:
     DATABASE_PATH = "constitutional_law.db"
     
     # Gemini API configuration
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyBdh1A4wDU4d_6sNzz3-QypQyVbNCX3_lI")
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "GEMINI_API_KEY")
     GEMINI_MODEL = "gemini-2.5-flash"
     # in your config.py
     IK_API_TOKEN = "abbb21b37c3bbc1458ae370c7cae561720e50a87"
