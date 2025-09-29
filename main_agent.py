@@ -8,6 +8,7 @@ from ui_agent import UIAgent
 from research_agent import ResearchAgent
 from documentation_agent import DocumentationAgent
 from exceptions import AgentException
+from trace_logger import TraceLogger
 
 class MainAgent:
     """Main orchestration agent that coordinates all other agents"""
@@ -15,33 +16,97 @@ class MainAgent:
     def __init__(self, config: Config = None):
         self.config = config or Config()
         self.db = ConstitutionalLawDB(self.config.DATABASE_PATH)
-        self.ui_agent = UIAgent(self.config)
-        self.research_agent = ResearchAgent(self.config)
-        self.documentation_agent = DocumentationAgent(self.config)
+        self.trace_logger = TraceLogger(self.db)
+        self.ui_agent = UIAgent(self.config, db=self.db, trace_logger=self.trace_logger)
+        self.research_agent = ResearchAgent(self.config, db=self.db, trace_logger=self.trace_logger)
+        self.documentation_agent = DocumentationAgent(self.config, db=self.db, trace_logger=self.trace_logger)
         self.logger = logging.getLogger(__name__)
 
     async def process_request(self, user_id: str, query: str) -> Dict[str, Any]:
         request_id = None
         try:
+            self.trace_logger.log_event(
+                agent="MainAgent",
+                event_type="request_received",
+                payload={"user_id": user_id, "query": query},
+                phase="received",
+            )
             # Step 1: Process user input with UI Agent
             self.logger.info("Starting request processing")
             ui_result = self.ui_agent.process_user_input(user_id, query)
             request_id = ui_result["request_id"]
+            self.trace_logger.log_event(
+                agent="MainAgent",
+                event_type="structured_query_ready",
+                payload={"structured_query": ui_result["structured_query"]},
+                request_id=request_id,
+                phase="ui_processing",
+            )
 
             # Step 2: Update status to researching
             self.db.update_request_status(request_id, "researching")
+            self.trace_logger.log_event(
+                agent="MainAgent",
+                event_type="status_updated",
+                payload={"status": "researching"},
+                request_id=request_id,
+                phase="status",
+            )
 
             # Step 3: Conduct research (with retry)
             research_data = await self._conduct_research_with_retry(request_id)
+            self.trace_logger.log_event(
+                agent="MainAgent",
+                event_type="research_completed",
+                payload={
+                    "cases": len(research_data.get("case_laws", [])),
+                    "statutes": len(research_data.get("statutes", [])),
+                    "articles": len(research_data.get("articles", [])),
+                },
+                request_id=request_id,
+                phase="research",
+            )
 
             # Step 4: Update status to documenting
             self.db.update_request_status(request_id, "documenting")
+            self.trace_logger.log_event(
+                agent="MainAgent",
+                event_type="status_updated",
+                payload={"status": "documenting"},
+                request_id=request_id,
+                phase="status",
+            )
 
             # Step 5: Generate documentation (with retry)
             documentation = await self._generate_documentation_with_retry(request_id)
+            self.trace_logger.log_event(
+                agent="MainAgent",
+                event_type="documentation_completed",
+                payload={
+                    "executive_summary_length": len(documentation.get("executive_summary", "")),
+                    "recommendations": len(documentation.get("recommendations", [])),
+                },
+                request_id=request_id,
+                phase="documentation",
+            )
 
             # Step 6: Update status to completed
             self.db.update_request_status(request_id, "completed")
+            self.trace_logger.log_event(
+                agent="MainAgent",
+                event_type="status_updated",
+                payload={"status": "completed"},
+                request_id=request_id,
+                phase="status",
+            )
+
+            self.trace_logger.log_event(
+                agent="MainAgent",
+                event_type="request_completed",
+                payload={"request_id": request_id},
+                request_id=request_id,
+                phase="completed",
+            )
 
             return {
                 "request_id": request_id,
@@ -60,6 +125,13 @@ class MainAgent:
         except Exception as e:
             error_msg = f"Request processing failed: {str(e)}"
             self.logger.error(error_msg)
+            self.trace_logger.log_event(
+                agent="MainAgent",
+                event_type="request_failed",
+                payload={"error": str(e)},
+                request_id=request_id,
+                phase="error",
+            )
             if request_id:
                 try:
                     self.db.update_request_status(request_id, "failed")

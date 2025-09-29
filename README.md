@@ -27,6 +27,8 @@ User Query → UI Agent → Main Agent → Research Agent → Documentation Agen
 - **Comprehensive Research**: Searches case law, statutes, pending cases, and scholarly articles
 - **Professional Documentation**: Generates executive summaries, legal analysis, and recommendations
 - **Database Integration**: Persistent storage of all queries, research, and results
+- **Explainability & Traceability**: Structured logs, artefact snapshots, and decision metadata for every agent
+- **Deterministic Controls**: Pinned prompts, zero-temperature LLM settings, and normalized external queries ensure repeatable outcomes
 - **Retry Logic**: Robust error handling with exponential backoff
 - **Status Tracking**: Real-time status updates for long-running research tasks
 
@@ -41,24 +43,24 @@ User Query → UI Agent → Main Agent → Research Agent → Documentation Agen
 ### Setup
 
 1. **Clone or download the system files**
-
 2. **Install dependencies**:
+
    ```bash
    pip install google-generativeai sqlite3 asyncio
    ```
-
 3. **Set up API keys**:
-   
+
    **Option A: Environment Variables (Recommended)**
+
    ```bash
    export GEMINI_API_KEY="your-gemini-api-key-here"
    ```
-   
+
    **Option B: Edit config.py**
+
    ```python
    GEMINI_API_KEY = "your-actual-gemini-api-key-here"
    ```
-
 4. **Initialize the database**:
    The database will be created automatically on first run.
 
@@ -67,17 +69,20 @@ User Query → UI Agent → Main Agent → Research Agent → Documentation Agen
 ### Command Line Interface
 
 #### Interactive Mode
+
 ```bash
 python main.py
 ```
 
 This starts an interactive session where you can:
+
 - Enter constitutional law research queries
 - Check status of ongoing research
 - View completed results
 - Get help and guidance
 
 #### Single Query Mode
+
 ```bash
 python main.py "What are the current limits on executive power?"
 ```
@@ -102,6 +107,7 @@ python main.py "What are the current limits on executive power?"
 ### Tables
 
 #### user_requests
+
 - `id` - Primary key
 - `user_id` - User identifier
 - `timestamp` - When request was submitted
@@ -110,6 +116,7 @@ python main.py "What are the current limits on executive power?"
 - `status` - Current status (pending, researching, documenting, completed)
 
 #### research_results
+
 - `id` - Primary key
 - `request_id` - Foreign key to user_requests
 - `sources` - JSON array of research sources
@@ -120,6 +127,7 @@ python main.py "What are the current limits on executive power?"
 - `research_timestamp` - When research was completed
 
 #### documentation_output
+
 - `id` - Primary key
 - `request_id` - Foreign key to user_requests
 - `output_json` - Complete structured documentation
@@ -144,14 +152,18 @@ To implement these integrations:
 ### Customization
 
 #### Agent Behavior
+
 Modify agent prompts in the respective agent files to customize:
+
 - Research focus areas
 - Documentation style
 - Analysis depth
 - Output format
 
 #### Database
+
 Extend the database schema in `database.py` to add:
+
 - User management
 - Research categories
 - Citation tracking
@@ -162,21 +174,62 @@ Extend the database schema in `database.py` to add:
 ### Agent Communication Flow
 
 1. **User Input Processing**
+
    - UI Agent receives natural language query
    - Gemini converts to structured JSON
    - Query stored in database
-
 2. **Research Coordination**
+
    - Main Agent updates status to "researching"
    - Research Agent searches multiple sources
    - Results deduplicated and validated
    - Research data stored in database
-
 3. **Documentation Generation**
+
    - Main Agent updates status to "documenting"
    - Documentation Agent processes research results
    - Gemini generates structured legal analysis
    - Final documentation stored and marked complete
+
+### Deterministic Output Controls
+
+The system minimizes randomness so retries give consistent results:
+
+- **Prompt Registry**: Agent prompts are stored as versioned templates (see `ui_agent.py`, `research_agent.py`, `documentation_agent.py`) so text generation always starts from the same instructions.
+- **LLM Settings**: The Gemini client uses temperature `0`, `top_p` `0`, and capped token budgets via `config.py`, eliminating sampling variance.
+- **Retry Strategy**: `MainAgent` drives exponential backoff with fixed intervals, and failed runs log the exact attempt count.
+- **Query Normalization**: `ResearchAgent` canonicalizes Indian Kanoon queries (ordering, spacing, removal of redundant tokens) before hitting external APIs.
+- **Shared State**: `TraceLogger` hashes payloads; comparing hashes across runs quickly shows whether responses changed.
+
+Together these controls make it straightforward to reproduce outputs across environments or identify when an upstream dependency diverges.
+
+### Explainability Tracing
+
+Every agent interaction now leaves an audit trail so you can replay exactly how a report was built:
+
+- **Structured Logs** (`trace_logs` table) capture who did what, when, and why with hashed payloads.
+- **Artefact Snapshots** (`artefact_snapshots` table) preserve the raw Gemini responses alongside the cleaned, structured objects stored in the system.
+- **Decision Metadata** (`decision_metadata` table) records each agent's reasoning (for example, how queries were structured or why a tool plan was chosen).
+
+All three tables link back to the originating `request_id`, making it easy to filter for a specific run.
+
+#### Peeking at a Trace (example for request `13`)
+
+```powershell
+.\.venv\Scripts\python.exe -c "import sqlite3, json; conn = sqlite3.connect('constitutional_law.db'); conn.row_factory = sqlite3.Row; cur = conn.cursor();
+for table in ('trace_logs','artefact_snapshots','decision_metadata'):
+   cur.execute('SELECT * FROM ' + table + ' WHERE request_id=? ORDER BY id', (13,));
+   rows = [dict(row) for row in cur.fetchall()];
+   print(f'== {table} ==');
+   if not rows:
+      print('(no rows)');
+   else:
+      for row in rows:
+         print(json.dumps(row, indent=2, default=str));
+conn.close()"
+```
+
+Replace `13` with any other request ID you want to audit. The output includes the timestamped payloads, Gemini artefacts, and decision rationales for that run.
 
 ### Error Handling
 
@@ -188,18 +241,21 @@ Extend the database schema in `database.py` to add:
 ### Production Considerations
 
 #### Security
+
 - Store API keys in environment variables
 - Implement user authentication
 - Add input sanitization
 - Use HTTPS for API communication
 
 #### Scalability
+
 - Add connection pooling for database
 - Implement async/await throughout
 - Add caching layer for repeated queries
 - Consider microservices architecture
 
 #### Monitoring
+
 - Add structured logging
 - Implement metrics collection
 - Monitor API usage and costs
@@ -214,17 +270,21 @@ This system is for research and educational purposes. Always verify legal inform
 ### Common Issues
 
 **"API key not found"**
+
 - Ensure GEMINI_API_KEY is set in environment or config.py
 
 **"Database locked"**
+
 - Close any other processes accessing the database file
 - Check file permissions
 
 **"Research timeout"**
+
 - Increase timeout values in config.py
 - Check internet connection for API access
 
 **"JSON parsing error"**
+
 - This typically resolves with retry logic
 - Check Gemini API status if persistent
 

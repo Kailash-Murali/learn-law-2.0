@@ -1,5 +1,5 @@
 from google import genai
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 import json
 import logging
 from datetime import datetime
@@ -7,6 +7,7 @@ from datetime import datetime
 from config import Config
 from database import ConstitutionalLawDB
 from exceptions import AgentException, ValidationException
+from trace_logger import TraceLogger
 import re
 
 def extract_first_json(text: str) -> str:
@@ -16,16 +17,18 @@ def extract_first_json(text: str) -> str:
 class UIAgent:
     """UI Agent for processing user input and converting to structured JSON"""
 
-    def __init__(self, config: Config = None):
+    def __init__(self, config: Config = None, db: Optional[ConstitutionalLawDB] = None,
+                 trace_logger: Optional[TraceLogger] = None):
         self.config = config or Config()
-        self.db = ConstitutionalLawDB(self.config.DATABASE_PATH)
+        self.db = db or ConstitutionalLawDB(self.config.DATABASE_PATH)
+        self.trace_logger = trace_logger
         self.client = genai.Client(api_key=self.config.GEMINI_API_KEY)
         self.logger = logging.getLogger(__name__)
 
     def process_user_input(self, user_id: str, query: str) -> Dict[str, Any]:
         """Process natural language user input and convert to structured JSON"""
         try:
-            structured_query = self._structure_query_with_gemini(query)
+            structured_query, raw_response = self._structure_query_with_gemini(query)
             self._validate_structured_query(structured_query)
             request_id = self.db.insert_user_request(
                 user_id=user_id,
@@ -33,16 +36,49 @@ class UIAgent:
                 query_summary=structured_query
             )
             self.logger.info(f"Processed user input for request {request_id}")
+            if self.trace_logger:
+                self.trace_logger.snapshot_artefact(
+                    agent="UIAgent",
+                    artefact_type="structured_query",
+                    content={
+                        "original_query": query,
+                        "structured_query": structured_query,
+                        "raw_response": raw_response,
+                    },
+                    request_id=request_id,
+                )
+                self.trace_logger.log_event(
+                    agent="UIAgent",
+                    event_type="structured_query_generated",
+                    payload={"fields": list(structured_query.keys())},
+                    request_id=request_id,
+                    phase="ui_processing",
+                )
+                self.trace_logger.record_decision(
+                    agent="UIAgent",
+                    decision_type="query_structuring",
+                    metadata=structured_query,
+                    request_id=request_id,
+                    rationale="Converted natural language into research template fields.",
+                )
             return {
                 "request_id": request_id,
                 "structured_query": structured_query,
-                "status": "pending"
+                "status": "pending",
+                "raw_response": raw_response,
             }
         except Exception as e:
             self.logger.error(f"Error processing user input: {str(e)}")
+            if self.trace_logger:
+                self.trace_logger.log_event(
+                    agent="UIAgent",
+                    event_type="error",
+                    payload={"error": str(e)},
+                    phase="ui_processing",
+                )
             raise AgentException(f"Failed to process user input: {str(e)}")
 
-    def _structure_query_with_gemini(self, query: str) -> Dict[str, Any]:
+    def _structure_query_with_gemini(self, query: str) -> Tuple[Dict[str, Any], str]:
         """Use Gemini to convert natural language to structured JSON"""
         prompt = f"""
         You are a constitutional law expert. Convert the following user query into structured JSON format for legal research.
@@ -75,7 +111,7 @@ class UIAgent:
                 response_text = response_text.replace("``````", "").strip()
             response_text = extract_first_json(response_text)
             structured_data = json.loads(response_text)
-            return structured_data
+            return structured_data, response_text
         except json.JSONDecodeError as e:
             raise AgentException(f"Failed to parse Gemini response as JSON: {str(e)}")
         except Exception as e:

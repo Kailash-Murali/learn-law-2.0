@@ -1,12 +1,13 @@
 from google import genai
 import asyncio
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Tuple
 import json
 import logging
 from ik_api_async import AsyncIKApi
 from config import Config
 from database import ConstitutionalLawDB
 from exceptions import AgentException, APIException
+from trace_logger import TraceLogger
 import re
 
 def extract_first_json(text: str) -> str:
@@ -25,9 +26,11 @@ def extract_query_string(tool_plan_value: str) -> str:
 class ResearchAgent:
     """Research Agent using Gemini AI to orchestrate all research tools"""
 
-    def __init__(self, config: Config = None):
+    def __init__(self, config: Config = None, db: Optional[ConstitutionalLawDB] = None,
+                 trace_logger: Optional[TraceLogger] = None):
         self.config = config or Config()
-        self.db = ConstitutionalLawDB(self.config.DATABASE_PATH)
+        self.db = db or ConstitutionalLawDB(self.config.DATABASE_PATH)
+        self.trace_logger = trace_logger
         self.client = genai.Client(api_key=self.config.GEMINI_API_KEY)
         self.logger = logging.getLogger(__name__)
         self.ikapi = AsyncIKApi(self.config.IK_API_TOKEN)
@@ -42,7 +45,33 @@ class ResearchAgent:
             self.logger.info(f"Starting research for request {request_id}")
 
             # Step 1: Use Gemini to decide tool usage & queries
-            tool_plan = self._get_tool_plan(query_summary)
+            tool_plan, raw_plan = self._get_tool_plan(query_summary)
+
+            normalized_queries = {
+                "case_law": extract_query_string(tool_plan.get('case_law_query', '') or ''),
+                "statute": extract_query_string(tool_plan.get('statute_query', '') or ''),
+                "pending": extract_query_string(tool_plan.get('pending_case_query', '') or ''),
+                "articles": extract_query_string(tool_plan.get('article_query', '') or ''),
+                "rag": extract_query_string(tool_plan.get('rag_query', '') or ''),
+            }
+
+            if self.trace_logger:
+                self.trace_logger.snapshot_artefact(
+                    agent="ResearchAgent",
+                    artefact_type="tool_plan",
+                    content={"raw_response": raw_plan, "plan": tool_plan},
+                    request_id=request_id,
+                )
+                self.trace_logger.record_decision(
+                    agent="ResearchAgent",
+                    decision_type="tool_plan",
+                    metadata={
+                        "normalized_queries": normalized_queries,
+                        "original_plan": tool_plan,
+                    },
+                    request_id=request_id,
+                    rationale="Prepared deterministic search queries for external tools.",
+                )
 
             # Step 2: For each tool/query, call mock function and gather results
             research_tasks = [
@@ -67,13 +96,42 @@ class ResearchAgent:
             # Store in database
             self.db.insert_research_results(request_id, research_data)
             self.logger.info(f"Research completed for request {request_id}")
+            if self.trace_logger:
+                self.trace_logger.snapshot_artefact(
+                    agent="ResearchAgent",
+                    artefact_type="research_results",
+                    content={
+                        "results": research_data,
+                        "queries": normalized_queries,
+                    },
+                    request_id=request_id,
+                )
+                self.trace_logger.log_event(
+                    agent="ResearchAgent",
+                    event_type="results_persisted",
+                    payload={
+                        "case_laws": len(research_data.get('case_laws', [])),
+                        "statutes": len(research_data.get('statutes', [])),
+                        "articles": len(research_data.get('articles', [])),
+                    },
+                    request_id=request_id,
+                    phase="research",
+                )
             return research_data
 
         except Exception as e:
             self.logger.error(f"Research failed for request {request_id}: {str(e)}")
+            if self.trace_logger:
+                self.trace_logger.log_event(
+                    agent="ResearchAgent",
+                    event_type="error",
+                    payload={"error": str(e)},
+                    request_id=request_id,
+                    phase="research",
+                )
             raise AgentException(f"Research failed: {str(e)}")
 
-    def _get_tool_plan(self, query_summary: Dict[str, Any]) -> Dict[str, Any]:
+    def _get_tool_plan(self, query_summary: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
         """
         Uses Gemini to decide which tools/queries to use for this research request.
         Returns dict with queries for each tool.
@@ -116,7 +174,7 @@ class ResearchAgent:
             response_text = response_text.replace("``````", "").strip()
         response_text = extract_first_json(response_text)
         tool_plan = json.loads(response_text)
-        return tool_plan
+        return tool_plan, response_text
 
     async def _case_law_api(self, query: str):
         # judgments doctype for case law

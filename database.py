@@ -53,6 +53,47 @@ class ConstitutionalLawDB:
                     FOREIGN KEY (request_id) REFERENCES user_requests (id)
                 )
             ''')
+
+            # Create trace_logs table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS trace_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id INTEGER,
+                    agent TEXT NOT NULL,
+                    phase TEXT,
+                    event_type TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    created_at DATETIME NOT NULL,
+                    FOREIGN KEY (request_id) REFERENCES user_requests (id)
+                )
+            ''')
+
+            # Create artefact_snapshots table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS artefact_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id INTEGER,
+                    agent TEXT NOT NULL,
+                    artefact_type TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at DATETIME NOT NULL,
+                    FOREIGN KEY (request_id) REFERENCES user_requests (id)
+                )
+            ''')
+
+            # Create decision_metadata table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS decision_metadata (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id INTEGER,
+                    agent TEXT NOT NULL,
+                    decision_type TEXT NOT NULL,
+                    rationale TEXT,
+                    metadata TEXT NOT NULL,
+                    created_at DATETIME NOT NULL,
+                    FOREIGN KEY (request_id) REFERENCES user_requests (id)
+                )
+            ''')
             
             conn.commit()
     
@@ -157,3 +198,59 @@ class ConstitutionalLawDB:
                 result['output_json'] = json.loads(result['output_json'])
                 return result
             return None
+
+    def insert_trace_log(self, agent: str, event_type: str, payload: Dict[str, Any],
+                         request_id: Optional[int] = None, phase: Optional[str] = None) -> int:
+        """Insert a structured trace log entry"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO trace_logs (request_id, agent, phase, event_type, payload, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (
+                request_id,
+                agent,
+                phase,
+                event_type,
+                json.dumps(payload, default=str),
+                datetime.now()
+            ))
+            conn.commit()
+            return cursor.lastrowid
+
+    def insert_artefact_snapshot(self, agent: str, artefact_type: str, content: Dict[str, Any],
+                                 request_id: Optional[int] = None) -> int:
+        """Persist an artefact snapshot for explainability"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO artefact_snapshots (request_id, agent, artefact_type, content, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (
+                request_id,
+                agent,
+                artefact_type,
+                json.dumps(content, default=str),
+                datetime.now()
+            ))
+            conn.commit()
+            return cursor.lastrowid
+
+    def insert_decision_metadata(self, agent: str, decision_type: str, metadata: Dict[str, Any],
+                                 request_id: Optional[int] = None, rationale: Optional[str] = None) -> int:
+        """Persist decision metadata for traceability"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO decision_metadata (request_id, agent, decision_type, rationale, metadata, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (
+                request_id,
+                agent,
+                decision_type,
+                rationale,
+                json.dumps(metadata, default=str),
+                datetime.now()
+            ))
+            conn.commit()
+            return cursor.lastrowid

@@ -1,11 +1,12 @@
 from google import genai
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Tuple
 import json
 import logging
 import datetime
 from config import Config
 from database import ConstitutionalLawDB
 from exceptions import AgentException
+from trace_logger import TraceLogger
 import re
 
 def extract_first_json(text: str) -> str:
@@ -15,9 +16,11 @@ def extract_first_json(text: str) -> str:
 class DocumentationAgent:
     """Documentation Agent for generating presentable JSON output"""
     
-    def __init__(self, config: Config = None):
+    def __init__(self, config: Config = None, db: Optional[ConstitutionalLawDB] = None,
+                 trace_logger: Optional[TraceLogger] = None):
         self.config = config or Config()
-        self.db = ConstitutionalLawDB(self.config.DATABASE_PATH)
+        self.db = db or ConstitutionalLawDB(self.config.DATABASE_PATH)
+        self.trace_logger = trace_logger
         
         # Initialize Gemini
         self.client = genai.Client(api_key=self.config.GEMINI_API_KEY)
@@ -44,20 +47,47 @@ class DocumentationAgent:
                 raise AgentException(f"Missing data for request {request_id}")
             
             # Generate structured documentation using Gemini
-            documentation = self._generate_structured_output(request_data, research_data)
+            documentation, raw_response = self._generate_structured_output(request_data, research_data)
             
             # Store documentation in database
             self.db.insert_documentation_output(request_id, documentation)
             
             self.logger.info(f"Documentation generated for request {request_id}")
+            if self.trace_logger:
+                self.trace_logger.snapshot_artefact(
+                    agent="DocumentationAgent",
+                    artefact_type="documentation",
+                    content={
+                        "raw_response": raw_response,
+                        "documentation": documentation,
+                    },
+                    request_id=request_id,
+                )
+                self.trace_logger.log_event(
+                    agent="DocumentationAgent",
+                    event_type="documentation_generated",
+                    payload={
+                        "sections": list(documentation.keys()),
+                    },
+                    request_id=request_id,
+                    phase="documentation",
+                )
             return documentation
             
         except Exception as e:
             self.logger.error(f"Documentation generation failed for request {request_id}: {str(e)}")
+            if self.trace_logger:
+                self.trace_logger.log_event(
+                    agent="DocumentationAgent",
+                    event_type="error",
+                    payload={"error": str(e)},
+                    request_id=request_id,
+                    phase="documentation",
+                )
             raise AgentException(f"Documentation generation failed: {str(e)}")
     
     def _generate_structured_output(self, request_data: Dict[str, Any], 
-                                  research_data: Dict[str, Any]) -> Dict[str, Any]:
+                                  research_data: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
         """Generate structured documentation using Gemini"""
         
         # Prepare context for Gemini
@@ -147,12 +177,13 @@ class DocumentationAgent:
                 "total_statutes": len(research_data.get("statutes", []))
             }
             
-            return documentation
+            return documentation, response_text
             
         except json.JSONDecodeError as e:
             # Fallback to basic structure if Gemini response is malformed
             self.logger.warning(f"JSON parsing failed, using fallback structure: {str(e)}")
-            return self._create_fallback_documentation(request_data, research_data)
+            fallback_doc = self._create_fallback_documentation(request_data, research_data)
+            return fallback_doc, response_text
         
         except Exception as e:
             raise AgentException(f"Gemini documentation generation failed: {str(e)}")
