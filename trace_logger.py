@@ -1,8 +1,9 @@
 import hashlib
 import json
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
+# Assuming ConstitutionalLawDB is in database.py
 from database import ConstitutionalLawDB
 
 
@@ -75,3 +76,26 @@ class TraceLogger:
     def _hash_payload(self, payload: Dict[str, Any]) -> str:
         serialized = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
         return hashlib.sha256(serialized).hexdigest()
+
+    # --- New methods to expose DB retrieval functionality ---
+
+    def get_full_request_trace(self, request_id: int) -> List[Dict[str, Any]]:
+        """
+        Retrieves all trace events, decisions, and artefact snapshots for a given request_id,
+        sorted chronologically. Delegates to ConstitutionalLawDB.
+        """
+        return self.db.get_combined_request_trace_data(request_id)
+
+    def get_artefact_snapshots_for_request(self, request_id: int) -> List[Dict[str, Any]]:
+        """
+        Retrieves summary details for all artefact snapshots for a given request_id.
+        Delegates to ConstitutionalLawDB.
+        """
+        return self.db.get_artefact_snapshots_for_request(request_id)
+
+    def get_artefact_content_by_id(self, artefact_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Retrieves the full 'content' of an artefact snapshot by its ID.
+        Delegates to ConstitutionalLawDB.
+        """
+        return self.db.get_artefact_full_content_by_id(artefact_id)

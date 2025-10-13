@@ -2,11 +2,15 @@ import asyncio
 import json
 import logging
 import sys
-from typing import Optional
+from datetime import datetime
+from typing import Optional, Any, Dict
 
+# Assuming these are available in your project structure
 from config import Config
 from main_agent import MainAgent
 from exceptions import ConstitutionalLawException
+from database import ConstitutionalLawDB # Assuming this is available for TraceLogger
+from trace_logger import TraceLogger # Assuming your TraceLogger is in tracelogger.py
 
 class ConstitutionalLawCLI:
     """Command Line Interface for Constitutional Law Research Agent System"""
@@ -22,7 +26,9 @@ class ConstitutionalLawCLI:
         # Initialize main agent
         try:
             self.config = Config()
-            self.main_agent = MainAgent(self.config)
+            # Ensure MainAgent initializes and exposes the TraceLogger
+            self.main_agent = MainAgent(self.config) 
+            self.trace_logger: TraceLogger = self.main_agent.trace_logger
             self.logger.info("Constitutional Law Research System initialized")
         except Exception as e:
             self.logger.error(f"Initialization failed: {str(e)}")
@@ -57,6 +63,18 @@ class ConstitutionalLawCLI:
                     request_id = int(command.split()[1])
                     await self._show_result(request_id)
                 
+                elif command.lower().startswith('trace '):
+                    request_id = int(command.split()[1])
+                    await self._show_trace(request_id)
+
+                elif command.lower().startswith('artefacts '):
+                    request_id = int(command.split()[1])
+                    await self._list_artefacts(request_id)
+
+                elif command.lower().startswith('artefact_content '):
+                    artefact_id = int(command.split()[1])
+                    await self._show_artefact_content(artefact_id)
+                
                 elif command.lower() == 'clear':
                     print("\n" * 50)  # Clear screen
                 
@@ -70,11 +88,11 @@ class ConstitutionalLawCLI:
             except KeyboardInterrupt:
                 print("\nGoodbye!")
                 break
-            except ValueError as e:
-                print(f"Error: Invalid input format - {str(e)}")
+            except (ValueError, IndexError) as e:
+                print(f"Error: Invalid input format. Please check the command and arguments. ({e})")
             except Exception as e:
                 self.logger.error(f"Command error: {str(e)}")
-                print(f"An error occurred: {str(e)}")
+                print(f"An unexpected error occurred: {str(e)}")
     
     async def _process_query(self, user_id: str, query: str):
         """Process a research query"""
@@ -108,6 +126,7 @@ class ConstitutionalLawCLI:
                         print(f"  • {case.get('case_name', 'Unknown')}")
             
             print(f"\nUse 'result {result['request_id']}' to see full documentation")
+            print(f"Use 'trace {result['request_id']}' to view the processing trace.") # Added trace instruction
             
         except ConstitutionalLawException as e:
             print(f"Research failed: {str(e)}")
@@ -134,6 +153,11 @@ class ConstitutionalLawCLI:
             
             if status.get('documentation_available'):
                 print(f"  Documentation: Available")
+            
+            # Optionally, add a brief summary of trace data
+            # This would require a lightweight query to trace_logger (e.g., count events/decisions)
+            # For simplicity, we'll just point to the trace command for now.
+            print(f"\nFor detailed processing trace, use 'trace {request_id}'")
         
         except Exception as e:
             print(f"Error retrieving status: {str(e)}")
@@ -154,11 +178,6 @@ class ConstitutionalLawCLI:
             print(f"\nEXECUTIVE SUMMARY")
             print("-" * 20)
             print(documentation.get('executive_summary', 'Not available'))
-            
-            # Legal Analysis
-            print(f"\nLEGAL ANALYSIS")
-            print("-" * 15)
-            print(documentation.get('legal_analysis', 'Not available'))
             
             # Case Law Review
             if documentation.get('case_law_review'):
@@ -189,15 +208,118 @@ class ConstitutionalLawCLI:
         
         except Exception as e:
             print(f"Error retrieving results: {str(e)}")
+
+    async def _show_trace(self, request_id: int):
+        """Show the chronological trace of events, decisions, and artefacts for a request."""
+        print(f"\n" + "="*60)
+        print(f"PROCESSING TRACE FOR REQUEST {request_id}")
+        print("="*60)
+        
+        try:
+            trace_data = self.trace_logger.get_full_request_trace(request_id)
+            if not trace_data:
+                print(f"No trace data found for request {request_id}.")
+                return
+
+            for entry in trace_data:
+                timestamp = (
+                    entry.get('logged_at') or 
+                    entry.get('recorded_at') or 
+                    entry.get('captured_at')
+                )
+                agent = entry.get('agent', 'N/A')
+                entry_type = entry['type'].upper()
+
+                print(f"\n[{timestamp}] AGENT: {agent} | TYPE: {entry_type}")
+                print("-" * 80)
+
+                if entry_type == 'EVENT':
+                    event_type = entry.get('event_type', 'N/A')
+                    phase = entry.get('phase', 'N/A')
+                    print(f"  Event Type: {event_type}")
+                    print(f"  Phase: {phase}")
+                    print(f"  Payload (excerpt): {json.dumps(entry.get('payload', {}), indent=2, default=str)[:500]}...") # Limit output
+                elif entry_type == 'DECISION':
+                    decision_type = entry.get('decision_type', 'N/A')
+                    rationale = entry.get('rationale', 'No rationale provided')
+                    print(f"  Decision Type: {decision_type}")
+                    print(f"  Rationale: {rationale}")
+                    print(f"  Metadata: {json.dumps(entry.get('metadata', {}), indent=2, default=str)}")
+                elif entry_type == 'ARTEFACT':
+                    artefact_type = entry.get('artefact_type', 'N/A')
+                    artefact_id = entry.get('id', 'N/A')
+                    print(f"  Artefact Type: {artefact_type}")
+                    print(f"  Artefact ID: {artefact_id}")
+                    # Display a summary or just indicate it's available
+                    print(f"  Content Summary: {str(entry.get('content_summary', 'Not available'))[:100]}...")
+                    print(f"  Use 'artefact_content {artefact_id}' to view full content.")
+
+        except Exception as e:
+            print(f"Error retrieving trace for request {request_id}: {str(e)}")
+
+    async def _list_artefacts(self, request_id: int):
+        """Lists all artefact snapshots for a given request_id."""
+        print(f"\n" + "="*60)
+        print(f"ARTEFACTS FOR REQUEST {request_id}")
+        print("="*60)
+
+        try:
+            artefacts = self.trace_logger.get_artefact_snapshots_for_request(request_id)
+            if not artefacts:
+                print(f"No artefacts found for request {request_id}.")
+                return
+            
+            for artefact in artefacts:
+                artefact_id = artefact.get('id', 'N/A')
+                artefact_type = artefact.get('artefact_type', 'N/A')
+                agent = artefact.get('agent', 'N/A')
+                captured_at = artefact.get('captured_at', 'N/A')
+                
+                print(f"\nID: {artefact_id}")
+                print(f"  Type: {artefact_type}")
+                print(f"  Agent: {agent}")
+                print(f"  Captured At: {captured_at}")
+                # Provide a snippet if available, or just indicate it's viewable
+                # Assuming 'content_summary' is part of the returned artefact dict
+                if 'content_summary' in artefact:
+                    print(f"  Summary: {str(artefact['content_summary'])[:150]}...")
+                print(f"  To view full content: artefact_content {artefact_id}")
+
+        except Exception as e:
+            print(f"Error listing artefacts for request {request_id}: {str(e)}")
+
+    async def _show_artefact_content(self, artefact_id: int):
+        """Displays the full content of a specific artefact by ID."""
+        print(f"\n" + "="*60)
+        print(f"ARTEFACT CONTENT FOR ID {artefact_id}")
+        print("="*60)
+
+        try:
+            artefact_data = self.trace_logger.get_artefact_content_by_id(artefact_id)
+            if not artefact_data:
+                print(f"Artefact with ID {artefact_id} not found.")
+                return
+            
+            print(f"Agent: {artefact_data.get('agent', 'N/A')}")
+            print(f"Type: {artefact_data.get('artefact_type', 'N/A')}")
+            print(f"Captured At: {artefact_data.get('captured_at', 'N/A')}")
+            print("\nFull Content:")
+            print(json.dumps(artefact_data.get('content', {}), indent=2, default=str))
+
+        except Exception as e:
+            print(f"Error retrieving content for artefact {artefact_id}: {str(e)}")
     
     def _show_help(self):
         """Show help information"""
         print("\nAvailable Commands:")
-        print("  help, h              - Show this help message")
-        print("  status <request_id>  - Show status of a research request")
-        print("  result <request_id>  - Show full results of a completed request")
-        print("  clear               - Clear the screen")
-        print("  quit, exit, q       - Exit the program")
+        print("  help, h               - Show this help message")
+        print("  status <request_id>   - Show status of a research request")
+        print("  result <request_id>   - Show full results of a completed request")
+        print("  trace <request_id>    - Show detailed chronological trace of processing steps")
+        print("  artefacts <request_id> - List all intermediate data snapshots for a request")
+        print("  artefact_content <id> - Show the full content of a specific artefact by its ID")
+        print("  clear                 - Clear the screen")
+        print("  quit, exit, q         - Exit the program")
         print("\nTo start a research query, simply type your constitutional law question.")
         print("Examples:")
         print("  • What is the current status of affirmative action in education?")
@@ -207,6 +329,12 @@ class ConstitutionalLawCLI:
 
 async def main():
     """Main entry point"""
+    # Fix for asyncio.run() being called multiple times in interactive mode,
+    # or when an event loop is already running.
+    # asyncio.run() should ideally be called once.
+    # If the CLI enters an interactive loop, the loop should already be running.
+    # For a simple command-line query, it's fine.
+
     if len(sys.argv) > 1:
         # Command line mode with query as argument
         cli = ConstitutionalLawCLI()
@@ -219,6 +347,9 @@ async def main():
 
 if __name__ == "__main__":
     try:
+        # asyncio.run() creates and manages the event loop for the entire program execution [3, 6, 8, 9, 10].
+        # It should typically be called only once as the main entry point [3, 9, 10].
+        # If the CLI is purely interactive, `asyncio.run` encompasses the entire `run_interactive_mode`.
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\nProgram interrupted by user")

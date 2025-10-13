@@ -75,7 +75,7 @@ class ConstitutionalLawDB:
                     request_id INTEGER,
                     agent TEXT NOT NULL,
                     artefact_type TEXT NOT NULL,
-                    content TEXT NOT NULL,
+                    content TEXT NOT NULL, -- This stores the wrapped_content from TraceLogger
                     created_at DATETIME NOT NULL,
                     FOREIGN KEY (request_id) REFERENCES user_requests (id)
                 )
@@ -108,7 +108,7 @@ class ConstitutionalLawDB:
                 VALUES (?, ?, ?, ?, ?)
             ''', (
                 user_id,
-                datetime.now(),
+                datetime.now().isoformat(), # Store as ISO format string
                 original_query,
                 json.dumps(query_summary),
                 'pending'
@@ -139,7 +139,7 @@ class ConstitutionalLawDB:
                 json.dumps(research_data.get('statutes', [])),
                 json.dumps(research_data.get('pending_cases', [])),
                 json.dumps(research_data.get('articles', [])),
-                datetime.now()
+                datetime.now().isoformat() # Store as ISO format string
             ))
             return cursor.lastrowid
     
@@ -154,7 +154,7 @@ class ConstitutionalLawDB:
             ''', (
                 request_id,
                 json.dumps(output_json),
-                datetime.now()
+                datetime.now().isoformat() # Store as ISO format string
             ))
             return cursor.lastrowid
     
@@ -213,7 +213,7 @@ class ConstitutionalLawDB:
                 phase,
                 event_type,
                 json.dumps(payload, default=str),
-                datetime.now()
+                datetime.now().isoformat() # Store as ISO format string
             ))
             conn.commit()
             return cursor.lastrowid
@@ -230,8 +230,8 @@ class ConstitutionalLawDB:
                 request_id,
                 agent,
                 artefact_type,
-                json.dumps(content, default=str),
-                datetime.now()
+                json.dumps(content, default=str), # This 'content' is the wrapped_content from TraceLogger
+                datetime.now().isoformat() # Store as ISO format string
             ))
             conn.commit()
             return cursor.lastrowid
@@ -250,7 +250,138 @@ class ConstitutionalLawDB:
                 decision_type,
                 rationale,
                 json.dumps(metadata, default=str),
-                datetime.now()
+                datetime.now().isoformat() # Store as ISO format string
             ))
             conn.commit()
             return cursor.lastrowid
+
+    def get_combined_request_trace_data(self, request_id: int) -> List[Dict[str, Any]]:
+        """
+        Retrieves all trace events, decisions, and artefact snapshots for a given request_id,
+        sorted chronologically by their logging/recording/capture timestamp.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            combined_data = []
+
+            # Fetch trace logs
+            cursor.execute('''
+                SELECT id, request_id, agent, phase, event_type, payload, created_at 
+                FROM trace_logs WHERE request_id = ?
+            ''', (request_id,))
+            for row in cursor.fetchall():
+                entry = dict(row)
+                entry['type'] = 'event'
+                entry['logged_at'] = entry.pop('created_at') # Standardize timestamp key
+                entry['payload'] = json.loads(entry['payload'])
+                combined_data.append(entry)
+
+            # Fetch artefact snapshots
+            cursor.execute('''
+                SELECT id, request_id, agent, artefact_type, content, created_at 
+                FROM artefact_snapshots WHERE request_id = ?
+            ''', (request_id,))
+            for row in cursor.fetchall():
+                entry = dict(row)
+                entry['type'] = 'artefact'
+                entry['captured_at'] = entry.pop('created_at') # Standardize timestamp key
+                
+                # The 'content' column contains the wrapped_content from TraceLogger
+                wrapped_content = json.loads(entry.pop('content'))
+                
+                # Extract original content and provide a summary for the trace view
+                entry['content_hash'] = wrapped_content.get('content_hash')
+                entry['original_content'] = wrapped_content.get('content') # Keep full content for potential drill-down
+                
+                # Create a concise summary for the trace display
+                content_summary_str = str(wrapped_content.get('content', {}))
+                entry['content_summary'] = content_summary_str[:150] + ('...' if len(content_summary_str) > 150 else '')
+                combined_data.append(entry)
+
+            # Fetch decision metadata
+            cursor.execute('''
+                SELECT id, request_id, agent, decision_type, rationale, metadata, created_at 
+                FROM decision_metadata WHERE request_id = ?
+            ''', (request_id,))
+            for row in cursor.fetchall():
+                entry = dict(row)
+                entry['type'] = 'decision'
+                entry['recorded_at'] = entry.pop('created_at') # Standardize timestamp key
+                entry['metadata'] = json.loads(entry['metadata'])
+                combined_data.append(entry)
+            
+            # Sort all entries by their timestamp
+            # We need to use the specific timestamp key for each type
+            def get_sort_key(item):
+                if item['type'] == 'event':
+                    return item['logged_at']
+                elif item['type'] == 'artefact':
+                    return item['captured_at']
+                elif item['type'] == 'decision':
+                    return item['recorded_at']
+                return "1970-01-01T00:00:00.000000" # Fallback for unexpected types
+
+            combined_data.sort(key=get_sort_key)
+            return combined_data
+
+    def get_artefact_snapshots_for_request(self, request_id: int) -> List[Dict[str, Any]]:
+        """
+        Retrieves summary details for all artefact snapshots for a given request_id.
+        Each dictionary includes 'id', 'agent', 'artefact_type', 'captured_at', and a content_summary.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, request_id, agent, artefact_type, content, created_at 
+                FROM artefact_snapshots WHERE request_id = ? ORDER BY created_at ASC
+            ''', (request_id,))
+            
+            artefact_summaries = []
+            for row in cursor.fetchall():
+                entry = dict(row)
+                
+                # The 'content' column stores the wrapped_content from TraceLogger
+                wrapped_content = json.loads(entry.pop('content'))
+                
+                # Extract relevant information
+                entry['captured_at'] = entry.pop('created_at') # Rename for consistency
+                
+                # Create a concise summary of the actual content
+                actual_content = wrapped_content.get('content', {})
+                content_summary_str = str(actual_content)
+                entry['content_summary'] = content_summary_str[:150] + ('...' if len(content_summary_str) > 150 else '')
+                
+                artefact_summaries.append(entry)
+            
+            return artefact_summaries
+
+    def get_artefact_full_content_by_id(self, artefact_id: int) -> Optional[Dict[str, Any]]:
+        """Retrieves the full 'content' of an artefact snapshot by its ID."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, agent, artefact_type, content, created_at 
+                FROM artefact_snapshots WHERE id = ?
+            ''', (artefact_id,))
+            row = cursor.fetchone()
+            
+            if row:
+                entry = dict(row)
+                
+                # The 'content' column stores the wrapped_content from TraceLogger
+                wrapped_content = json.loads(entry.pop('content'))
+                
+                # We want to return the actual 'content' part, not the wrapper
+                result = {
+                    'id': entry['id'],
+                    'agent': entry['agent'],
+                    'artefact_type': entry['artefact_type'],
+                    'captured_at': entry['created_at'], # Use the database's creation time
+                    'content': wrapped_content.get('content') # This is the actual artefact content
+                }
+                return result
+            return None
