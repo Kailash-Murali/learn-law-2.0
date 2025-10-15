@@ -96,10 +96,10 @@ class DocumentationAgent:
             "research_topic": request_data["query_summary"]["research_topic"],
             "key_questions": request_data["query_summary"]["key_questions"],
             "legal_concepts": request_data["query_summary"]["legal_concepts"],
-            "case_laws": research_data["case_laws"][:5],  # Limit for context
-            "statutes": research_data["statutes"][:3],
-            "pending_cases": research_data["pending_cases"][:2],
-            "articles": research_data["articles"][:3]
+            "case_laws": research_data["case_laws"],
+            "statutes": research_data["statutes"],
+            "pending_cases": research_data["pending_cases"],
+            "articles": research_data["articles"]
         }
         
         prompt = f"""
@@ -115,6 +115,7 @@ class DocumentationAgent:
         3. case_law_review: Analysis of relevant cases with key holdings
         4. statutory_provisions: Review of applicable constitutional provisions
         5. recommendations: Practical recommendations or next steps
+        6. include all the inputs that you are getting, dont leave out any case, statutory, or article
         
         Format your response as valid JSON with this structure:
         {{
@@ -149,7 +150,7 @@ class DocumentationAgent:
             ]
         }}
         
-        Ensure all analysis is legally accurate and professionally formatted. DO NOT include any text outside the JSON structure.
+        Ensure all analysis is legally accurate and professionally formatted. DO NOT include any text outside the JSON structure. DO NOT INCLUDE ANY OTHER SOURCE OF INFORMATION OTHER THAN MY SOURCE.
         """
         
         try:

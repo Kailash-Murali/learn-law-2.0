@@ -9,6 +9,7 @@ from database import ConstitutionalLawDB
 from exceptions import AgentException, APIException
 from trace_logger import TraceLogger
 import re
+from springer import SpringerLegalResearch, SpringerConfig
 
 def extract_first_json(text: str) -> str:
     match = re.search(r"\{.*\}", text, re.DOTALL)
@@ -34,6 +35,14 @@ class ResearchAgent:
         self.client = genai.Client(api_key=self.config.GEMINI_API_KEY)
         self.logger = logging.getLogger(__name__)
         self.ikapi = AsyncIKApi(self.config.IK_API_TOKEN)
+        springer_config = SpringerConfig(
+            meta_api_key=self.config.SPRINGER_META_API_KEY,
+            openaccess_api_key=self.config.SPRINGER_OPENACCESS_API_KEY,
+            results_per_page=15,
+            max_results=20,
+            enable_openaccess=True
+        )
+        self.springer = SpringerLegalResearch(springer_config)
 
 
     async def conduct_research(self, request_id: int) -> Dict[str, Any]:
@@ -78,12 +87,13 @@ class ResearchAgent:
                 self._case_law_api(tool_plan.get('case_law_query')),
                 self._statute_api(tool_plan.get('statute_query')),
                 self._pending_case_api(tool_plan.get('pending_case_query')),
-                self._mock_article_api(tool_plan.get('article_query')),  # Remains mock for now
+                self._springer_article_api(tool_plan.get('article_query')),  # Real Springer API
                 self._mock_rag_search(tool_plan.get('rag_query')),       # RAG: do later
             ]
             print("Case Law Query: ", tool_plan.get('case_law_query'))
             print("Statute Query: ", tool_plan.get('statute_query'))
             print("Pending Case Query: ", tool_plan.get('pending_case_query'))
+            print("Article Query: ", tool_plan.get('article_query'))
             results = await asyncio.gather(*research_tasks, return_exceptions=True)
             research_data = {
                 'case_laws': results[0] if not isinstance(results[0], Exception) else [],
@@ -137,33 +147,58 @@ class ResearchAgent:
         Returns dict with queries for each tool.
         """
         prompt = f"""
-            You are an expert legal research agent. Given a user research request, generate queries to retrieve information using the Indian Kanoon API.
+                You are an expert legal research agent. Given a user research request, generate queries for TWO different systems:
+                1. Indian Kanoon API (for Indian case law, statutes, pending cases)
+                2. Springer Nature API (for academic articles and scholarly commentary)
 
-            **IMPORTANT GUIDELINES:**
-            - ALWAYS use concise legal keywords, case names, major statutes (e.g. 'article 21', 'Maneka Gandhi'), or quoted legal phrases (e.g. "personal liberty", "freedom of speech").
-            - DO NOT generate conversational or natural language questions.
-            - Use Indian Kanoon API logical operators: ANDD, ORR, NOTT, for combining/negating words.
-            - For **case law**, target judgments and major case names, e.g. formInput='"article 21" ANDD "right to life"'.
-            - For **statutes**, target Indian acts/rules, e.g. formInput='"Protection of Women from Domestic Violence Act"'.
-            - For **pending cases**, use recent terms, keywords, or phrases related to ongoing matters.
-            - For **articles**, use concise legal topics or phrases; leave blank if not relevant.
-            - If the request references recent cases, specify 'fromdate' or 'todate' fields (in DD-MM-YYYY).
-            - Suggest appropriate 'doctypes' (e.g. judgments, acts, highcourts).
-            - Return empty string "" if a tool is not relevant for this query.
-            - Your response must be STRICTLY valid JSON, do NOT include extraneous commentary or formatting outside JSON.
+                **INDIAN KANOON QUERIES:**
+                - Use concise legal keywords, case names, major statutes (e.g. 'article 21', 'Maneka Gandhi')
+                - Use quoted legal phrases (e.g. "personal liberty", "freedom of speech")
+                - Use Indian Kanoon logical operators: ANDD, ORR, NOTT
+                - For **case law**: Target judgments, e.g. '"article 21" ANDD "right to life"'
+                - For **statutes**: Target Indian acts, e.g. '"Protection of Women from Domestic Violence Act"'
+                - For **pending cases**: Use recent terms/keywords for ongoing matters
 
-            **User Research Request:**  
-            {json.dumps(query_summary, indent=2)}
+                **SPRINGER NATURE QUERIES (CRITICAL RULES):**
+                - Use ONLY 2-3 keywords maximum
+                - Use specific legal terminology that uniquely identifies law topics
+                - GOOD examples (self-evidently legal, no ambiguity):
+                * "constitutional rights India"
+                * "judicial review"
+                * "Article 21"
+                * "fundamental rights"
+                * "separation of powers"
+                * "rule of law India"
+                - BAD examples (too generic, will match non-legal articles):
+                * "human rights law" (matches medical papers about humans)
+                * "privacy law" (matches tech/engineering papers)
+                * "equality law" (matches physics/math papers)
+                * "law" (way too broad)
+                - **KEY INSIGHT**: Words like "human", "rights", "privacy", "freedom", "equality" appear in science/tech papers too!
+                Instead use: "constitutional", "judicial", "statute", "Article [number]", "Supreme Court"
+                - If the topic is inherently ambiguous, make it specific:
+                * Instead of "privacy law" → "constitutional privacy India"
+                * Instead of "human rights law" → "fundamental rights India"
+                * Instead of "equality law" → "constitutional equality"
+                - Return empty string "" if scholarly articles are not relevant
 
-            **Your output:**  
-            {{
-            "case_law_query": "Indian Kanoon search string and filters (quotes/ANDD/ORR/NOTT/doctype if needed)",
-            "statute_query": "search string and filters for statute retrieval",
-            "pending_case_query": "search string and filters for ongoing/pending cases",
-            "article_query": "topic or keywords for legal commentary or leave blank",
-            "rag_query": "semantic search phrase for database"
-            }}
-            """
+                **GENERAL RULES:**
+                - Return empty string "" for any tool not relevant to this query
+                - Your response must be STRICTLY valid JSON only
+                - DO NOT include commentary, markdown, or formatting outside JSON
+
+                **User Research Request:**  
+                {json.dumps(query_summary, indent=2)}
+
+                **Your output (MUST be valid JSON):**  
+                {{
+                "case_law_query": "Indian Kanoon search for judgments",
+                "statute_query": "Indian Kanoon search for statutes/acts",
+                "pending_case_query": "Indian Kanoon search for pending cases",
+                "article_query": "2-3 SPECIFIC legal keywords (use constitutional/judicial terms, not generic terms)",
+                "rag_query": "semantic search phrase for database"
+                }}
+                """
 
         response = self.client.models.generate_content(
             model=self.config.GEMINI_MODEL,
@@ -224,6 +259,31 @@ class ResearchAgent:
             }
             for doc in docs
         ]
+    
+    async def _springer_article_api(self, query: str) -> List[Dict[str, Any]]:
+        """
+        Search Springer Nature for academic articles.
+        Uses Meta API for broader coverage.
+        """
+        if not query or query.strip() == "":
+            return []
+        
+        try:
+            article_query = extract_query_string(query)
+            
+            # Search using Springer Meta API (Basic plan compatible)
+            results = await self.springer.search_meta(
+                query=article_query,
+                filters=None,  # No filters for now, can add later
+                use_basic_plan=True  # IMPORTANT: You have Basic plan
+            )
+            
+            self.logger.info(f"Springer returned {len(results)} articles for query: {article_query}")
+            return results
+            
+        except Exception as e:
+            self.logger.error(f"Springer API failed: {str(e)}")
+            return []  # Return empty on failure, don't break the whole research
     # ---- MOCK/Fake tool implementations below ----
     async def _mock_case_law_api(self, query: str) -> List[Dict[str, Any]]:
         await asyncio.sleep(0.2)

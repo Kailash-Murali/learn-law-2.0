@@ -17,6 +17,9 @@ class Config:
     # in your config.py
     IK_API_TOKEN = "abbb21b37c3bbc1458ae370c7cae561720e50a87"
 
+    SPRINGER_META_API_KEY: str = "cfbab3fb1ac671d4b411e034375edd54"
+    SPRINGER_OPENACCESS_API_KEY: str = "1adc3c130fae757475f10ef16013f0bb"
+
     # Legal API placeholders (to be implemented)
     LEGAL_APIS = {
         "courtlistener": {
