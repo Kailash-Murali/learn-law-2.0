@@ -37,10 +37,3 @@ Desktop.ini
 *.pt
 *.pth
 *.onnx
-
-# Images
-*.png
-*.jpg
-*.jpeg
-*.gif
-*.bmp
