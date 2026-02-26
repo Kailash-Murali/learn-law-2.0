@@ -12,13 +12,19 @@ class Config:
     DATABASE_PATH = "constitutional_law.db"
     
     # Gemini API configuration
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "GEMINI_API_KEY")
-    GEMINI_MODEL = "gemini-2.5-flash"
+    GEMINI_API_KEY = "dummy" #os.getenv("GEMINI_API_KEY", "GEMINI_API_KEY")
+    GEMINI_MODEL = "gemini-2.0-flash"
+    
+    # Groq API configuration (FREE, reliable alternative)
+    # Get your key from: https://console.groq.com/keys
+    GROQ_API_KEY = "dummy"  # Replace with your actual key
+    GROQ_MODEL = "llama-3.1-8b-instant"
+    
     # in your config.py
-    IK_API_TOKEN = "abbb21b37c3bbc1458ae370c7cae561720e50a87"
+    IK_API_TOKEN = "dummmy"
 
-    SPRINGER_META_API_KEY: str = "cfbab3fb1ac671d4b411e034375edd54"
-    SPRINGER_OPENACCESS_API_KEY: str = "1adc3c130fae757475f10ef16013f0bb"
+    SPRINGER_META_API_KEY: str = "dummy"
+    SPRINGER_OPENACCESS_API_KEY: str = "dummy"
 
     # Legal API placeholders (to be implemented)
     LEGAL_APIS = {
