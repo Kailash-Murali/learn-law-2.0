@@ -23,11 +23,15 @@ Desktop.ini
 
 # Logs
 *.log
+api_client.log
 
 # Data
 *.csv
 *.tsv
 *.dat
+
+# Database files (optional - uncomment to track)
+# constitutional_law.db
 
 # Model files
 *.h5
@@ -37,3 +41,10 @@ Desktop.ini
 *.pt
 *.pth
 *.onnx
+
+# API Keys - NEVER commit these!
+# config.py  # Uncomment if you have secrets in config.py
+
+# Next.js build output
+learn-law/learn-law/.next/
+learn-law/learn-law/node_modules/

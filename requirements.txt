@@ -1,4 +1,18 @@
-google-genai>=1.30.0
+# Constitutional Law Research Agent System - Requirements
+# AutoGen multi-agent system with Advanced XAI
+
+# Core LLM APIs
+groq>=0.4.0
+
+# Database
 aiosqlite>=0.21.0
-python-dotenv>=1.0.0
-aiohttp>=3.12.0
+
+# Async HTTP
+aiohttp>=3.9.0
+httpx>=0.25.0
+
+# Data validation
+pydantic>=2.0.0
+
+# XAI Dependencies
+numpy>=1.24.0
