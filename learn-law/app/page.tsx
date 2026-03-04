@@ -11,6 +11,7 @@ export interface Message {
   id: string
   role: "user" | "assistant"
   text: string
+  uiPayload?: Record<string, any> | null
 }
 
 export interface ChatSession {
@@ -21,6 +22,78 @@ export interface ChatSession {
 }
 
 export default function Page() {
+  // ── Helpers ──────────────────────────────────────────────
+  /** Build a nicely formatted text from the backend ui_payload + documentation. */
+  function formatBackendResponse(data: Record<string, any>): {
+    text: string
+    uiPayload: Record<string, any> | null
+  } {
+    const ui = data.ui_payload as Record<string, any> | undefined
+    const doc = data.documentation as Record<string, any> | undefined
+
+    // Primary content: prefer ui_payload.content, then documentation fields
+    let mainText =
+      ui?.content ??
+      doc?.answer ??
+      doc?.draft ??
+      doc?.executive_summary ??
+      data.error ??
+      "No results returned."
+
+    const sections: string[] = [mainText]
+
+    // — Validation badges from ui_payload —
+    if (ui?.validation) {
+      const v = ui.validation
+
+      // Risk badge
+      if (v.risk_label) {
+        const riskEmoji =
+          v.risk_label === "low" ? "🟢" : v.risk_label === "medium" ? "🟡" : "🔴"
+        sections.push(`\n${riskEmoji} Confidence: ${v.risk_label.toUpperCase()} (risk score ${v.risk_score ?? "?"})`)
+      }
+
+      // Citations
+      if (v.citations && v.citations.length > 0) {
+        sections.push("\n📚 Case Citations:")
+        for (const c of v.citations) {
+          const badge = c.ik_verified ? "✅" : "⚠️"
+          const link = c.ik_link ? ` — ${c.ik_link}` : ""
+          sections.push(`  ${badge} ${c.citation}${link}`)
+        }
+      }
+
+      // Statutes
+      if (v.statutes && v.statutes.length > 0) {
+        sections.push("\n📜 Statutes Referenced:")
+        for (const s of v.statutes) {
+          const badge = s.ik_verified ? "✅" : "⚠️"
+          const link = s.ik_link ? ` — ${s.ik_link}` : ""
+          sections.push(`  ${badge} ${s.statute}${link}`)
+        }
+      }
+
+      // Bad laws warnings
+      if (v.bad_laws && v.bad_laws.length > 0) {
+        sections.push("\n⛔ Repealed / Unconstitutional Laws Detected:")
+        for (const b of v.bad_laws) {
+          sections.push(`  🚫 ${b.law} — ${b.reason}`)
+        }
+      }
+
+      // Flags
+      if (v.flags && v.flags.length > 0) {
+        sections.push("\n⚠️ Flags:")
+        for (const f of v.flags) {
+          sections.push(`  • ${f}`)
+        }
+      }
+    }
+
+    return { text: sections.join("\n"), uiPayload: ui ?? null }
+  }
+
+  // ── State ────────────────────────────────────────────────
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
@@ -65,19 +138,52 @@ export default function Page() {
     }
 
     const sid = currentSessionId
-    setTimeout(() => {
-      setThinking(false)
-      const assistantMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        text: `You asked: "${text}". (Connect your backend here to get a real answer.)`,
-      }
-      const finalMessages = [...updatedMessages, assistantMsg]
-      setMessages(finalMessages)
-      setSessions((prev) =>
-        prev.map((s) => s.id === sid ? { ...s, messages: finalMessages } : s)
-      )
-    }, 1500)
+
+    // Call the backend API
+    fetch("/api/research", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: text }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: res.statusText }))
+          throw new Error(err.error ?? "Research request failed")
+        }
+        return res.json()
+      })
+      .then((data) => {
+        setThinking(false)
+        const { text, uiPayload } = formatBackendResponse(data)
+        const assistantMsg: Message = {
+          id: (Date.now() + 1).toString(),
+          role: "assistant",
+          text,
+          uiPayload,
+        }
+        const finalMessages = [...updatedMessages, assistantMsg]
+        setMessages(finalMessages)
+        setSessions((prev) =>
+          prev.map((s) =>
+            s.id === sid ? { ...s, messages: finalMessages } : s,
+          ),
+        )
+      })
+      .catch((err) => {
+        setThinking(false)
+        const assistantMsg: Message = {
+          id: (Date.now() + 1).toString(),
+          role: "assistant",
+          text: `⚠ ${err.message ?? "Something went wrong. Is the backend running?"}`,
+        }
+        const finalMessages = [...updatedMessages, assistantMsg]
+        setMessages(finalMessages)
+        setSessions((prev) =>
+          prev.map((s) =>
+            s.id === sid ? { ...s, messages: finalMessages } : s,
+          ),
+        )
+      })
   }
 
   function loadSession(session: ChatSession) {
