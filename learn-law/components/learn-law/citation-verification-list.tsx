@@ -3,6 +3,8 @@
 import { useState } from "react"
 import { ChevronRight, ExternalLink, BookOpen, ScrollText, CheckCircle2, AlertTriangle } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { ValidationStatusBanner } from "./validation-status-banner"
+import { RiskScoreBadge } from "./risk-score-badge"
 
 interface Citation {
   name: string
@@ -14,10 +16,23 @@ interface CitationVerificationListProps {
   citations: Citation[]
   statutes: Citation[]
   articleRefs?: string[]
+  isGrounded?: boolean
+  riskLabel?: string
+  riskScore?: number
+  ikAvailable?: boolean
   className?: string
 }
 
-export function CitationVerificationList({ citations, statutes, articleRefs = [], className }: CitationVerificationListProps) {
+export function CitationVerificationList({
+  citations,
+  statutes,
+  articleRefs = [],
+  isGrounded,
+  riskLabel,
+  riskScore,
+  ikAvailable,
+  className,
+}: CitationVerificationListProps) {
   const [open, setOpen] = useState(false)
 
   const totalCitations = citations.length
@@ -27,7 +42,9 @@ export function CitationVerificationList({ citations, statutes, articleRefs = []
   const totalItems = totalCitations + totalStatutes
   const totalVerified = verifiedCitations + verifiedStatutes
 
-  if (totalItems === 0 && articleRefs.length === 0) return null
+  const hasValidation = riskLabel !== undefined && riskScore !== undefined
+
+  if (totalItems === 0 && articleRefs.length === 0 && !hasValidation) return null
 
   return (
     <div className={cn("rounded-lg border border-background/10 overflow-hidden", className)}>
@@ -39,7 +56,7 @@ export function CitationVerificationList({ citations, statutes, articleRefs = []
       >
         <BookOpen className="size-4 shrink-0 text-background/50" aria-hidden />
         <span className="text-sm font-medium text-background/80 flex-1 text-left">
-          Sources
+          Sources &amp; Validation
           {totalItems > 0 && (
             <span className="text-background/40 font-normal ml-1.5">
               ({totalVerified}/{totalItems} verified)
@@ -158,6 +175,19 @@ export function CitationVerificationList({ citations, statutes, articleRefs = []
                   </span>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* ── Validation section ── */}
+          {hasValidation && (
+            <div className={cn("px-3 py-2.5 flex items-center gap-3", (totalItems > 0 || articleRefs.length > 0) && "border-t border-background/10")}>
+              <ValidationStatusBanner
+                isGrounded={isGrounded!}
+                riskLabel={riskLabel!}
+                ikAvailable={ikAvailable!}
+                className="flex-1 rounded-none bg-transparent px-0 py-0"
+              />
+              <RiskScoreBadge score={riskScore!} label={riskLabel!} size="sm" className="shrink-0" />
             </div>
           )}
         </div>

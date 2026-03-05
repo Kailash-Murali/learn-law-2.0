@@ -28,6 +28,8 @@ export async function POST(req: NextRequest) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         query: body.query.trim(),
+        mode: body.mode ?? null,
+        draft_type: body.draft_type ?? null,
       }),
     })
 

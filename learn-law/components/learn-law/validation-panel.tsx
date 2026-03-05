@@ -1,12 +1,12 @@
 "use client"
 
+import { useState } from "react"
+import { AlertOctagon, ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ValidationStatusBanner } from "./validation-status-banner"
 import { RiskScoreBadge } from "./risk-score-badge"
 import { BadLawCard, type BadLaw } from "./bad-law-card"
 import { CitationVerificationList } from "./citation-verification-list"
-import { FlagsSection } from "./flags-section"
-import { FeedbackSection } from "./feedback-section"
 
 interface Citation {
   name: string
@@ -19,12 +19,10 @@ export interface ValidationData {
   risk_label: string
   risk_score: number
   ik_available: boolean
-  feedback_id?: string
   citations: Citation[]
   statutes: Citation[]
   bad_laws: BadLaw[]
   article_refs: string[]
-  flags: string[]
 }
 
 interface ValidationPanelProps {
@@ -38,57 +36,66 @@ export function ValidationPanel({ validation, className }: ValidationPanelProps)
     risk_label,
     risk_score,
     ik_available,
-    feedback_id,
     citations,
     statutes,
     bad_laws,
     article_refs,
-    flags,
   } = validation
 
+  const [badLawsOpen, setBadLawsOpen] = useState(false)
+
   const hasBadLaws = bad_laws && bad_laws.length > 0
-  const hasSources = (citations && citations.length > 0) || (statutes && statutes.length > 0) || (article_refs && article_refs.length > 0)
-  const hasFlags = flags && flags.length > 0
+  const criticalCount = hasBadLaws ? bad_laws.length : 0
+  const hasSources =
+    (citations && citations.length > 0) ||
+    (statutes && statutes.length > 0) ||
+    (article_refs && article_refs.length > 0)
 
   return (
     <div className={cn("space-y-2.5 mt-3", className)}>
-      {/* ── Row 1: Status banner + Risk score ── */}
-      <div className="flex items-start gap-3">
-        <ValidationStatusBanner
-          isGrounded={is_grounded}
-          riskLabel={risk_label}
-          ikAvailable={ik_available}
-          className="flex-1"
-        />
-        <RiskScoreBadge score={risk_score} label={risk_label} size="sm" />
-      </div>
-
-      {/* ── Row 2: Bad laws (open by default, highest priority) ── */}
+      {/* ── Row 1: Bad laws accordion ── */}
       {hasBadLaws && (
-        <div className="space-y-1.5">
-          <p className="text-[10px] uppercase tracking-wider text-background/40 font-medium px-1">
-            Repealed / Unconstitutional Laws ({bad_laws.length})
-          </p>
-          {bad_laws.map((bl, i) => (
-            <BadLawCard key={`${bl.law}-${i}`} badLaw={bl} defaultOpen={i === 0} />
-          ))}
+        <div className="rounded-lg border border-background/10 overflow-hidden">
+          <button
+            onClick={() => setBadLawsOpen((v) => !v)}
+            className="flex w-full items-center gap-3 px-3 py-2.5 hover:bg-background/5 transition-colors cursor-pointer"
+            aria-expanded={badLawsOpen}
+          >
+            <AlertOctagon className="size-4 shrink-0 text-red-400" aria-hidden />
+            <span className="text-sm font-medium text-background/80 flex-1 text-left">
+              Repealed / Unconstitutional Laws
+            </span>
+            {criticalCount > 0 && (
+              <span className="shrink-0 text-[11px] font-semibold px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-300">
+                {criticalCount}
+              </span>
+            )}
+            <ChevronRight
+              className={cn("size-4 text-background/30 transition-transform duration-200", badLawsOpen && "rotate-90")}
+              aria-hidden
+            />
+          </button>
+
+          {badLawsOpen && (
+            <div className="border-t border-background/10 px-3 py-2.5 space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+              {bad_laws.map((bl, i) => (
+                <BadLawCard key={`${bl.law}-${i}`} badLaw={bl} defaultOpen={i === 0} />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
-      {/* ── Row 3: Sources (collapsed by default) ── */}
-      {hasSources && (
-        <CitationVerificationList
-          citations={citations}
-          statutes={statutes}
-          articleRefs={article_refs}
-        />
-      )}
-
-      {/* ── Row 4: Flags (collapsed by default) ── */}
-      {hasFlags && <FlagsSection flags={flags} />}
-
-      {/* ── Row 5: Feedback ID ── */}
-      {feedback_id && <FeedbackSection feedbackId={feedback_id} />}
+      {/* ── Row 2: Sources & Validation ── */}
+      <CitationVerificationList
+        citations={citations ?? []}
+        statutes={statutes ?? []}
+        articleRefs={article_refs ?? []}
+        isGrounded={is_grounded}
+        riskLabel={risk_label}
+        riskScore={risk_score}
+        ikAvailable={ik_available}
+      />
     </div>
   )
 }

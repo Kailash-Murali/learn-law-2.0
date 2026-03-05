@@ -65,9 +65,14 @@ class ResearchAdapter:
     #  Core operations
     # ------------------------------------------------------------------ #
 
-    def research(self, query: str) -> Dict[str, Any]:
+    def research(self, query: str, *, mode: str | None = None, draft_type: str | None = None) -> Dict[str, Any]:
         """
         Run a full research pipeline for *query*.
+
+        Parameters
+        ----------
+        mode       : optional mode tag e.g. "[research]", "[draft]", "[reports]"
+        draft_type : draft sub-type when mode is "[draft]"
 
         Returns a normalised result dict:
             {
@@ -79,8 +84,20 @@ class ResearchAdapter:
             }
         """
         self._ensure_ready()
+
+        want_research = mode == "[research]"
+        want_draft = draft_type if mode == "[draft]" else None
+        want_report = mode == "[reports]"
+        want_pdf = mode == "[reports]"
+
         try:
-            raw = self._system.run_research(query)
+            raw = self._system.run_research(
+                query,
+                want_research=want_research,
+                want_report=want_report,
+                want_pdf=want_pdf,
+                want_draft=want_draft,
+            )
             return self._normalise(query, raw)
         except ConstitutionalLawException as exc:
             logger.error("Research error for query '%s': %s", query, exc)
@@ -114,6 +131,7 @@ class ResearchAdapter:
             "validation": raw.get("validation"),
             "ui_payload": raw.get("ui_payload"),
             "pdf_path": raw.get("pdf_path"),
+            "docx_path": raw.get("docx_path"),
             "error": raw.get("error"),
         }
 
@@ -127,5 +145,6 @@ class ResearchAdapter:
             "validation": None,
             "ui_payload": None,
             "pdf_path": None,
+            "docx_path": None,
             "error": message,
         }

@@ -13,8 +13,11 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, status
+import os
+
+from fastapi import FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from cli_adapter import ResearchAdapter
@@ -36,6 +39,8 @@ logger = logging.getLogger(__name__)
 
 class ResearchRequest(BaseModel):
     query: str = Field(..., min_length=3, max_length=2000, description="Legal research query")
+    mode: str | None = Field(None, description="Query mode tag, e.g. [research], [draft], [reports]")
+    draft_type: str | None = Field(None, description="Draft sub-type when mode is [draft]")
 
 
 class ResearchResponse(BaseModel):
@@ -47,6 +52,7 @@ class ResearchResponse(BaseModel):
     validation: Optional[Dict[str, Any]] = None
     ui_payload: Optional[Dict[str, Any]] = None
     pdf_path: Optional[str] = None
+    docx_path: Optional[str] = None
     error: Optional[str] = None
     timestamp: str
 
@@ -139,7 +145,7 @@ async def run_research(body: ResearchRequest):
             detail="Research system not initialised. Check API keys via /api/health.",
         )
 
-    result = adapter.research(body.query)
+    result = adapter.research(body.query, mode=body.mode, draft_type=body.draft_type)
 
     if result["status"] == "error":
         raise HTTPException(
@@ -156,6 +162,7 @@ async def run_research(body: ResearchRequest):
         validation=result.get("validation"),
         ui_payload=result.get("ui_payload"),
         pdf_path=result.get("pdf_path"),
+        docx_path=result.get("docx_path"),
         error=result.get("error"),
         timestamp=datetime.utcnow().isoformat(),
     )
@@ -179,3 +186,16 @@ async def parse_query(body: ParseRequest):
         return {"status": "ok", "parsed": parsed}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/download", tags=["files"])
+async def download_file(path: str = Query(..., description="Server-side file path")):
+    """Download a generated file (PDF or DOCX) by its server path."""
+    resolved = os.path.realpath(path)
+    # Prevent path-traversal: file must exist under the project directory
+    project_root = os.path.realpath(os.path.dirname(__file__))
+    if not resolved.startswith(project_root + os.sep):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not os.path.isfile(resolved):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(resolved, filename=os.path.basename(resolved))

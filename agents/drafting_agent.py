@@ -119,3 +119,38 @@ INSTRUCTIONS:
             "type": "legal_draft",
             "reasoning_trace": self.get_reasoning_trace()
         }
+
+    def generate_docx(self, draft_text: str, query: str, draft_type: str) -> str | None:
+        """Render *draft_text* into a Word document and return the file path.
+
+        Returns None if python-docx is not installed.
+        """
+        try:
+            from docx import Document  # python-docx
+            from docx.shared import Pt
+        except ImportError:
+            _logger.warning("python-docx not installed — skipping DOCX generation")
+            return None
+
+        doc = Document()
+        title = self.SUPPORTED_TYPES.get(draft_type, draft_type).upper()
+        doc.add_heading(title, level=1)
+        doc.add_paragraph(f"Query: {query}").italic = True
+
+        for paragraph in draft_text.split("\n"):
+            stripped = paragraph.strip()
+            if not stripped:
+                doc.add_paragraph("")
+                continue
+            p = doc.add_paragraph(stripped)
+            for run in p.runs:
+                run.font.size = Pt(11)
+
+        import os, tempfile
+        out_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "output")
+        os.makedirs(out_dir, exist_ok=True)
+        filename = f"{draft_type}_{id(draft_text) & 0xFFFFFF:06x}.docx"
+        path = os.path.join(out_dir, filename)
+        doc.save(path)
+        _logger.info("DOCX saved: %s", path)
+        return path

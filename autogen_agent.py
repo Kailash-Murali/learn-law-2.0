@@ -649,6 +649,16 @@ class Coordinator:
                 result["documentation"] = self.drafting_agent.generate_draft(
                     query, research_for_doc, want_draft
                 )
+                # Generate Word document for the draft
+                try:
+                    docx_path = self.drafting_agent.generate_docx(
+                        result["documentation"]["draft"], query, want_draft
+                    )
+                    result["docx_path"] = docx_path
+                    if show_logs and docx_path:
+                        print(f"✅ DOCX saved: {docx_path}")
+                except Exception as exc:
+                    _logging.getLogger(__name__).warning("DOCX generation failed: %s", exc)
                 if show_logs:
                     print("✅ Draft generated\n")
             elif want_report or want_pdf:
