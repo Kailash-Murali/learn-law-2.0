@@ -183,7 +183,7 @@ class ConstitutionalLawCLI:
                 for case, url in list(citation_links.items())[:8]:
                     if url:
                         print(f"    ✅ {case}")
-                        print(f"       🔗 {url}")
+                        print(f"       {url}")
                     else:
                         print(f"    ⚠️  {case}  (not found on Indian Kanoon)")
 
@@ -196,7 +196,7 @@ class ConstitutionalLawCLI:
                 for statute, url in list(statute_links.items())[:6]:
                     if url:
                         print(f"    ✅ {statute}")
-                        print(f"       🔗 {url}")
+                        print(f"        {url}")
                     else:
                         print(f"    ⚠️  {statute}  (not found on Indian Kanoon)")
             elif not statute_refs and not article_refs:
@@ -205,10 +205,10 @@ class ConstitutionalLawCLI:
             if article_refs:
                 print(f"\n  Constitutional Refs: {', '.join(article_refs[:6])}")
 
-            if flags:
-                print(f"\n  Flags:")
-                for f in flags[:5]:
-                    print(f"    ⚑ {f}")
+            # if flags:
+            #     print(f"\n  Flags:")
+            #     for f in flags[:5]:
+            #         print(f"    {f}")
 
         # ── Springer Research Papers (if --research was used) ────────────
         springer_results = result.get("springer_results", {})

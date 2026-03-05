@@ -182,6 +182,259 @@ If no cases are cited, return: []"""
             pass
         return None
 
+    def _analyze_verified_cases_for_bad_laws(
+        self,
+        verified_cases: List[str],
+        citation_links: Dict[str, Optional[str]],
+        original_query: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Phase 2: Analyze verified Indian case law to extract constitutional defect claims.
+        
+        For each verified case, uses LLM to identify laws that are claimed to be:
+        - Struck down (completely or partially)
+        - Stayed (enforcement halted)
+        - Under constitutional review
+        - Narrowly interpreted
+        
+        Only reports findings grounded in judicial holdings, not dicta.
+        
+        Args:
+            verified_cases: List of case names verified to exist on Indian Kanoon
+            citation_links: Dict mapping case names to Indian Kanoon URLs
+            original_query: The original user research query for context
+            
+        Returns:
+            List of bad laws found with case references and holdings
+        """
+        if not verified_cases:
+            return []
+        
+        # Cap analysis at 8 cases to optimize LLM context
+        cases_to_analyze = verified_cases[:8]
+        
+        # Format verified cases as JSON for LLM prompt
+        cases_json = json.dumps({
+            "cases": [
+                {
+                    "name": case,
+                    "ik_url": citation_links.get(case, "")
+                }
+                for case in cases_to_analyze
+            ],
+            "count": len(cases_to_analyze),
+            "original_query": original_query
+        }, indent=2)
+        
+        # Construct specialized prompt for bad law analysis
+        analysis_prompt = f"""You are a Constitutional Law Bad-Law Detection Specialist. Your exclusive task is to analyze verified Indian case law to identify constitutional defects.
+
+VERIFIED CASES TO ANALYZE:
+{cases_json}
+
+TASK: For EACH case, extract any claims that specific laws are unconstitutional, struck down, partially invalid, stayed, or otherwise legally defective.
+
+ANALYSIS REQUIREMENTS:
+1. Laws explicitly claimed to be unconstitutional / struck down / invalid / stayed
+2. The specific provision(s) affected (e.g., "entire section" vs. "as applied to X")
+3. The judicial holding or ratio decidendi supporting the claim
+4. The status category: struck_down_completely | struck_down_partially | stayed_enforcement | under_constitutional_review | narrowly_interpreted
+
+CRITICAL FILTERS:
+- HOLDING-ONLY: Report ONLY if law invalidity is the core holding or ratio decidendi
+- EXCLUDE: Incidental mentions in dicta, hypothetical discussions, or commentary
+- SPECIFICITY: If partiality ("struck down as applied to X"), explicitly state the scope
+- YEAR: Include year for temporal validation
+- JUDGES: List presiding judges if available
+
+DECISION QUALITY INDICATORS:
+- Single-judge dissent with good reasoning = lower weight ("discussion_only": true)
+- Multi-judge bench consensus = full weight
+- Constitutional bench (5+ judges) = highest weight
+- Recent years (2015+) = more current
+
+OUTPUT FORMAT (STRICT JSON ONLY - no markdown, no explanation):
+
+[
+  {{
+    "case_name": "Case Name v. Respondent (Year)",
+    "bench_size": <number>,
+    "bad_laws_identified": [
+      {{
+        "law": "Full legal citation of the provision",
+        "status": "struck_down_completely|struck_down_partially|stayed_enforcement|under_review|narrowly_interpreted",
+        "scope": "Description of what is invalid",
+        "holding": "1-2 sentence judicial holding about invalidity",
+        "ratio_decidendi": "The binding principle/reasoning",
+        "discussion_only": false,
+        "impact_description": "Practical impact of this invalidity",
+        "judges": "List of key judges"
+      }}
+    ],
+    "confidence_level": "high|medium|low"
+  }}
+]
+
+If NO bad laws found, return:
+[
+  {{
+    "case_name": "Case Name (Year)",
+    "bad_laws_identified": [],
+    "confidence_level": "high"
+  }}
+]
+
+CONFIDENTIALITY NOTES:
+- If uncertain about a claim, DO NOT REPORT IT
+- If only incidental mention, use "discussion_only": true
+- Mark confidence as "low" if reasoning is unclear
+- Better to miss a bad law than falsely report one"""
+
+        self.log_reasoning_step(
+            "bad_law_analysis_initiated",
+            {
+                "action": "analyzing_verified_cases_for_constitutional_defects",
+                "verified_cases_count": len(cases_to_analyze),
+                "rationale": "Extract constitutional defect claims from cited case holdings"
+            }
+        )
+        
+        # Call LLM for bad law analysis
+        try:
+            response = self.call_llm(analysis_prompt, log_reasoning=False)
+            
+            # Parse JSON response
+            bad_laws_by_case = self._parse_bad_law_analysis_response(response)
+            
+            self.log_reasoning_step(
+                "bad_law_analysis_completed",
+                {
+                    "action": "ik_cross_verification_of_constitutional_defects",
+                    "total_bad_laws_identified": sum(
+                        len(case_data.get("bad_laws_identified", []))
+                        for case_data in bad_laws_by_case
+                    ),
+                    "cases_analyzed": len(cases_to_analyze)
+                }
+            )
+            
+            # Flatten and standardize bad laws for integration
+            bad_laws_found = self._flatten_bad_law_findings(bad_laws_by_case)
+            
+            return bad_laws_found
+            
+        except Exception as e:
+            _logger.warning(f"Bad law analysis failed: {e}")
+            self.log_reasoning_step(
+                "bad_law_analysis_error",
+                {
+                    "action": "bad_law_analysis_failed",
+                    "error": str(e),
+                    "fallback": "skipping dynamic bad law analysis"
+                }
+            )
+            return []
+
+    def _parse_bad_law_analysis_response(self, response: str) -> List[Dict[str, Any]]:
+        """
+        Parse LLM response for bad law analysis.
+        
+        Extracts JSON array from response and validates structure.
+        Handles trailing whitespace and extraneous text after JSON.
+        """
+        try:
+            # Try to find JSON array in response
+            bracket_start = response.index("[")
+            bracket_end = response.rindex("]") + 1
+            json_str = response[bracket_start:bracket_end].strip()
+            
+            # Attempt to parse JSON
+            parsed = json.loads(json_str)
+            
+            if not isinstance(parsed, list):
+                _logger.warning(f"Bad law analysis response is not a list: {type(parsed)}")
+                return []
+            
+            return parsed
+            
+        except json.JSONDecodeError as e:
+            # If standard parsing fails, try incremental approach
+            # Start from "[" and scan forward to find valid JSON endpoint
+            try:
+                bracket_start = response.index("[")
+                # Try parsing progressively longer substrings from the start
+                for i in range(len(response), bracket_start, -1):
+                    candidate = response[bracket_start:i].strip()
+                    if not candidate.endswith("]"):
+                        continue
+                    try:
+                        parsed = json.loads(candidate)
+                        if isinstance(parsed, list):
+                            _logger.debug(f"Successfully parsed bad law response with incremental approach at position {i}")
+                            return parsed
+                    except json.JSONDecodeError:
+                        continue
+                
+                _logger.warning(f"Failed to parse bad law analysis JSON (incremental approach exhausted): {e}")
+                return []
+                
+            except (ValueError, json.JSONDecodeError) as inner_e:
+                _logger.warning(f"Failed to parse bad law analysis JSON (both methods): {inner_e}")
+                return []
+        except (ValueError, IndexError) as e:
+            _logger.warning(f"Failed to locate JSON array in bad law response: {e}")
+            return []
+
+    def _flatten_bad_law_findings(self, bad_laws_by_case: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Flatten bad law findings from case-structured format to flat list.
+        
+        Deduplicates laws appearing in multiple cases and normalizes structure.
+        """
+        seen_laws = {}  # Track laws by normalized name
+        flattened = []
+        
+        for case_entry in bad_laws_by_case:
+            case_name = case_entry.get("case_name", "Unknown")
+            bad_laws = case_entry.get("bad_laws_identified", [])
+            
+            for bad_law in bad_laws:
+                law_name = bad_law.get("law", "").strip()
+                if not law_name:
+                    continue
+                
+                # Normalize law name (lowercase for comparison)
+                normalized = law_name.lower()
+                
+                # If we've seen this law before, merge the findings
+                if normalized in seen_laws:
+                    # Keep the one with higher confidence
+                    existing = seen_laws[normalized]
+                    if bad_law.get("confidence_level") == "high" and existing.get("confidence_level") != "high":
+                        seen_laws[normalized] = self._standardize_bad_law(bad_law, case_name)
+                else:
+                    # New law finding
+                    standardized = self._standardize_bad_law(bad_law, case_name)
+                    seen_laws[normalized] = standardized
+                    flattened.append(standardized)
+        
+        return flattened
+
+    def _standardize_bad_law(self, bad_law: Dict[str, Any], case_name: str) -> Dict[str, Any]:
+        """
+        Standardize bad law finding to consistent structure for validation output.
+        """
+        return {
+            "law": bad_law.get("law", ""),
+            "reason": bad_law.get("holding", bad_law.get("reason", "")),
+            "case": case_name,
+            "status": bad_law.get("status", "struck_down_completely"),
+            "scope": bad_law.get("scope", ""),
+            "year": bad_law.get("year", None),
+            "confidence": bad_law.get("confidence_level", "medium"),
+            "discussion_only": bad_law.get("discussion_only", False)
+        }
+
     def validate(self, query: str, research: Dict[str, Any]) -> Dict[str, Any]:
         """
         Validate research via Indian Kanoon API cross-verification.
@@ -189,9 +442,9 @@ If no cases are cited, return: []"""
         Steps:
           1. Regex extracts Article/Section refs (always reliable).
           2. Regex extracts statute/act citations.
-          3. Rule-based scan for repealed / struck-down laws.
-          4. LLM extracts case names; each is looked up on Indian Kanoon.
-          5. Statutes are looked up on Indian Kanoon.
+          3. LLM extracts case names; each is looked up on Indian Kanoon.
+          4. Statutes are looked up on Indian Kanoon.
+          5. (NEW - Phase 2) LLM analyzes verified case law for constitutional defects.
           6. Hallucination risk = f(unverified cases, bad laws, missing statutes).
         """
         research_content = research.get("research_content", "")
@@ -217,17 +470,10 @@ If no cases are cited, return: []"""
             statute_refs.extend(re.findall(pat, research_content, re.IGNORECASE))
         statute_refs = sorted(set(s.strip() for s in statute_refs if len(s.strip()) > 3))
 
-        # ── Step 1c: Bad-law scan (regex-based, accurate matching) ──────────────
-        # Uses regex patterns with word boundaries instead of simple substring matching
-        # to avoid false positives (e.g., "section 66a" shouldn't match in "section 66 approach")
-        bad_laws_found: List[Dict[str, str]] = []
-        for pattern, (display_name, reason) in self.REPEALED_OR_BAD_LAWS.items():
-            try:
-                if re.search(pattern, research_content, re.IGNORECASE):
-                    bad_laws_found.append({"law": display_name, "reason": reason})
-            except Exception:
-                # Skip if regex is invalid
-                pass
+        # ── Step 1c: Bad-law scan → DELEGATED TO PHASE 2 ──────────────────────
+        # Phase 2 (dynamic analysis) replaces static regex-based detection.
+        # Bad laws will be detected from verified case law (Step 3c).
+        bad_laws_found: List[Dict[str, Any]] = []
 
         # ── Step 2: Ask LLM to extract case names ────────────────────────
         raw = self.call_llm(
@@ -271,6 +517,32 @@ If no cases are cited, return: []"""
                 hit = self._ik_statute_search(statute)
                 statute_links[statute] = hit["url"] if hit else None
 
+        # ── Step 3c (NEW - PHASE 2): Dynamic bad law analysis from verified cases ──
+        # Analyze verified case law to identify constitutional defects dynamically
+        if ik_available and verified:
+            bad_laws_found = self._analyze_verified_cases_for_bad_laws(
+                verified_cases=verified,
+                citation_links=citation_links,
+                original_query=query
+            )
+        else:
+            if not ik_available:
+                self.log_reasoning_step(
+                    "bad_law_analysis_skipped",
+                    {
+                        "reason": "IK_API_TOKEN not set",
+                        "action": "skipping_dynamic_bad_law_analysis"
+                    }
+                )
+            if not verified:
+                self.log_reasoning_step(
+                    "bad_law_analysis_skipped",
+                    {
+                        "reason": "No verified cases",
+                        "action": "skipping_dynamic_bad_law_analysis"
+                    }
+                )
+
         # ── Step 4: Compute hallucination risk ───────────────────────────
         total = len(extracted_cases)
         flags: List[str] = []
@@ -297,10 +569,26 @@ If no cases are cited, return: []"""
             risk = min(1.0, risk + 0.10)
             flags.append("No statute or constitutional article citations — answer may lack legal grounding")
 
-        # 4c — bad-law penalty (rule-based, each bad law adds 0.15 to risk)
+        # 4c — bad-law penalty (Phase 2: dynamic analysis, weighted by confidence)
         for bl in bad_laws_found:
-            risk = min(1.0, risk + 0.15)
-            flags.append(f"BAD LAW CITED: {bl['law']} — {bl['reason']}")
+            # Skip penalties for incidental mentions (discussion_only)
+            if bl.get("discussion_only", False):
+                continue
+            
+            # Weight by confidence level
+            confidence = bl.get("confidence", "medium")
+            if confidence == "high":
+                risk_increment = 0.15
+            elif confidence == "medium":
+                risk_increment = 0.10
+            else:  # low
+                risk_increment = 0.05
+            
+            risk = min(1.0, risk + risk_increment)
+            law_name = bl.get("law", "Unknown Law")
+            case_citation = bl.get("case", "")
+            status = bl.get("status", "struck_down_completely")
+            flags.append(f"BAD LAW IDENTIFIED: {law_name} ({status}) — {case_citation}")
 
         risk = round(risk, 2)
         feedback_id = str(uuid.uuid4())[:8].upper()
@@ -334,7 +622,7 @@ If no cases are cited, return: []"""
         self.log_reasoning_step(
             "validation_completed",
             {
-                "action"              : "ik_cross_verification_done",
+                "action"              : "ik_cross_verification_done_with_phase2_bad_law_analysis",
                 "cases_extracted"     : total,
                 "verified_on_ik"      : len(verified),
                 "unverified_on_ik"    : len(unverified),
@@ -346,7 +634,7 @@ If no cases are cited, return: []"""
                 "risk_label"          : risk_label,
                 "is_grounded"         : is_grounded,
                 "feedback_id"         : feedback_id,
-                "rationale"           : "Cases + statutes cross-verified on IK; bad-law rule scan applied"
+                "rationale"           : "Cases + statutes cross-verified on IK; Phase 2 dynamic bad-law analysis applied to verified cases"
             }
         )
 

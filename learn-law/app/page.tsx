@@ -5,6 +5,7 @@ import { CornerIcons } from "@/components/learn-law/corner-icons"
 import { Hero } from "@/components/learn-law/hero"
 import { ChatInput } from "@/components/learn-law/chat-input"
 import { Footer } from "@/components/learn-law/footer"
+import { ValidationPanel, type ValidationData } from "@/components/learn-law/validation-panel"
 import { Scale } from "lucide-react"
 
 export interface Message {
@@ -23,7 +24,7 @@ export interface ChatSession {
 
 export default function Page() {
   // ── Helpers ──────────────────────────────────────────────
-  /** Build a nicely formatted text from the backend ui_payload + documentation. */
+  /** Extract main content text and structured ui payload from backend response. */
   function formatBackendResponse(data: Record<string, any>): {
     text: string
     uiPayload: Record<string, any> | null
@@ -31,8 +32,8 @@ export default function Page() {
     const ui = data.ui_payload as Record<string, any> | undefined
     const doc = data.documentation as Record<string, any> | undefined
 
-    // Primary content: prefer ui_payload.content, then documentation fields
-    let mainText =
+    // Primary content only — validation is rendered as rich components
+    const mainText =
       ui?.content ??
       doc?.answer ??
       doc?.draft ??
@@ -40,57 +41,7 @@ export default function Page() {
       data.error ??
       "No results returned."
 
-    const sections: string[] = [mainText]
-
-    // — Validation badges from ui_payload —
-    if (ui?.validation) {
-      const v = ui.validation
-
-      // Risk badge
-      if (v.risk_label) {
-        const riskEmoji =
-          v.risk_label === "low" ? "🟢" : v.risk_label === "medium" ? "🟡" : "🔴"
-        sections.push(`\n${riskEmoji} Confidence: ${v.risk_label.toUpperCase()} (risk score ${v.risk_score ?? "?"})`)
-      }
-
-      // Citations
-      if (v.citations && v.citations.length > 0) {
-        sections.push("\n📚 Case Citations:")
-        for (const c of v.citations) {
-          const badge = c.ik_verified ? "✅" : "⚠️"
-          const link = c.ik_link ? ` — ${c.ik_link}` : ""
-          sections.push(`  ${badge} ${c.citation}${link}`)
-        }
-      }
-
-      // Statutes
-      if (v.statutes && v.statutes.length > 0) {
-        sections.push("\n📜 Statutes Referenced:")
-        for (const s of v.statutes) {
-          const badge = s.ik_verified ? "✅" : "⚠️"
-          const link = s.ik_link ? ` — ${s.ik_link}` : ""
-          sections.push(`  ${badge} ${s.statute}${link}`)
-        }
-      }
-
-      // Bad laws warnings
-      if (v.bad_laws && v.bad_laws.length > 0) {
-        sections.push("\n⛔ Repealed / Unconstitutional Laws Detected:")
-        for (const b of v.bad_laws) {
-          sections.push(`  🚫 ${b.law} — ${b.reason}`)
-        }
-      }
-
-      // Flags
-      if (v.flags && v.flags.length > 0) {
-        sections.push("\n⚠️ Flags:")
-        for (const f of v.flags) {
-          sections.push(`  • ${f}`)
-        }
-      }
-    }
-
-    return { text: sections.join("\n"), uiPayload: ui ?? null }
+    return { text: mainText, uiPayload: ui ?? null }
   }
 
   // ── State ────────────────────────────────────────────────
@@ -261,14 +212,21 @@ export default function Page() {
                 {msg.role === "assistant" && (
                   <Scale className="size-4 mt-1 mr-2 shrink-0 text-background/60" aria-hidden />
                 )}
-                <div
-                  className={`max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap
-                    ${msg.role === "user"
-                      ? "bg-background text-foreground rounded-br-sm"
-                      : "bg-background/10 text-background rounded-bl-sm"
-                    }`}
-                >
-                  {msg.text}
+                <div className={msg.role === "user" ? "max-w-[78%]" : "max-w-[78%] flex flex-col"}>
+                  <div
+                    className={`rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap
+                      ${msg.role === "user"
+                        ? "bg-background text-foreground rounded-br-sm"
+                        : "bg-background/10 text-background rounded-bl-sm"
+                      }`}
+                  >
+                    {msg.text}
+                  </div>
+                  {msg.role === "assistant" && msg.uiPayload?.validation && (
+                    <ValidationPanel
+                      validation={msg.uiPayload.validation as ValidationData}
+                    />
+                  )}
                 </div>
               </div>
             ))}
