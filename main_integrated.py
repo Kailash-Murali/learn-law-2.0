@@ -31,9 +31,6 @@ class ConstitutionalLawCLI:
         try:
             from autogen_agent import AutoGenLegalResearch
             self.research_system = AutoGenLegalResearch()
-            print("[System] AutoGen Multi-Agent System initialized")
-            print("[System] Jurisdiction: Indian Law Only")
-            print("[System] Anti-Hallucination: XAIValidationAgent active")
             return True
         except Exception as e:
             logger.error(f"Initialization failed: {e}")
@@ -43,11 +40,12 @@ class ConstitutionalLawCLI:
     def _parse_inline_flags(self, raw_query: str):
         """
         Detect trailing inline flags in a query string.
-        Supported flags: --pdf, --report, --logs, --draft <type>
-        Returns (clean_query, want_report, want_pdf, want_draft, show_logs_override)
+        Supported flags: --pdf, --report, --logs, --draft <type>, --research, --draft <type>
+        Returns (clean_query, want_report, want_pdf, want_draft, show_logs_override, want_research)
         """
         want_pdf = False
         want_report = False
+        want_research = False
         want_draft: str | None = None
         show_logs_override = False
 
@@ -70,6 +68,8 @@ class ConstitutionalLawCLI:
                 want_pdf = True
             elif tok == "--report":
                 want_report = True
+            elif tok == "--research":
+                want_research = True
             elif tok == "--logs":
                 show_logs_override = True
             elif tok == "--draft":
@@ -84,20 +84,17 @@ class ConstitutionalLawCLI:
             i += 1
 
         clean_query = " ".join(remaining)
-        return clean_query, want_report, want_pdf, want_draft, show_logs_override
+        return clean_query, want_report, want_pdf, want_draft, show_logs_override, want_research
 
     def process_query(self, query: str, want_report: bool = False,
                       want_pdf: bool = False, want_draft: str | None = None,
-                      show_logs: bool = False) -> dict:
+                      show_logs: bool = False, want_research: bool = False) -> dict:
         """Process a legal research query."""
-        print(f"\n{'='*60}")
-        print(f"Query: {query}")
-        print(f"{'='*60}\n")
 
         try:
             result = self.research_system.run_research(
                 query, want_report=want_report, want_pdf=want_pdf,
-                want_draft=want_draft, show_logs=show_logs
+                want_draft=want_draft, show_logs=show_logs, want_research=want_research
             )
             return result
         except Exception as e:
@@ -129,14 +126,12 @@ class ConstitutionalLawCLI:
 
         # ── Simple answer (default) ──────────────────────────────────────
         if doc_type == "simple_answer":
-            print("⚖️  LEGAL ANSWER")
-            print("="*70)
             print("\n" + doc.get("answer", "No answer generated."))
         # ── Legal draft ─────────────────────────────────────────────────────
         elif doc_type == "legal_draft":
-            print("📝 LEGAL DRAFT")
-            print(f"   Type: {doc.get('draft_description', doc.get('draft_type', 'N/A'))}")
-            print("="*70)
+            # print("📝 LEGAL DRAFT")
+            # print(f"   Type: {doc.get('draft_description', doc.get('draft_type', 'N/A'))}")
+            # print("="*70)
             print("\n" + doc.get("draft", "No draft generated."))
         # ── Full structured report ───────────────────────────────────────
         else:
@@ -169,11 +164,7 @@ class ConstitutionalLawCLI:
             verified        = validation.get("verified_on_ik", [])
             unverified      = validation.get("unverified_on_ik", [])
             ik_available    = validation.get("ik_available", False)
-
-            print("\n" + "-"*70)
-            print("🔎 VALIDATION SUMMARY (XAIValidationAgent + Indian Kanoon)")
-            print("-"*70)
-            print(f"  Factual grounding : {'✅ Grounded' if validation.get('is_grounded') else '⚠️  Weak grounding'}")
+            print(f"\n  Factual grounding : {'✅ Grounded' if validation.get('is_grounded') else '⚠️  Weak grounding'}")
             print(f"  Hallucination risk: {risk_label} ({risk:.0%})")
             print(f"  IK verification   : {'✅ Active' if ik_available else '⚠️  Skipped (IK_API_TOKEN not set)'}")
 
@@ -219,9 +210,48 @@ class ConstitutionalLawCLI:
                 for f in flags[:5]:
                     print(f"    ⚑ {f}")
 
+        # ── Springer Research Papers (if --research was used) ────────────
+        springer_results = result.get("springer_results", {})
+        if springer_results:
+            papers = springer_results.get("combined_papers", [])
+            status = springer_results.get("status", "unknown")
+            total = springer_results.get("total_papers", 0)
+            
+            if papers and total > 0:
+                print(f"\n  Springer Academic Research ({total} papers found):")
+                for paper in papers[:10]:
+                    title = paper.get("title", "N/A")
+                    url = paper.get("url", "")
+                    authors = paper.get("authors", "")
+                    journal = paper.get("journal", "")
+                    doi = paper.get("doi", "")
+                    source = paper.get("source", "Springer")
+                    
+                    print(f"\n    📄 {title}")
+                    if authors:
+                        print(f"       Authors: {authors[:100]}")
+                    if journal:
+                        print(f"       Journal: {journal}")
+                    if doi:
+                        print(f"       DOI: {doi}")
+                    if url:
+                        print(f"       🔗 {url}")
+                        print(f"       Source: {source}")
+                    else:
+                        print(f"       ⚠️  No direct link available")
+            elif status == "failed":
+                errors = springer_results.get("errors", [])
+                if errors:
+                    print(f"\n  Springer Research: ⚠️  {errors[0]}")
+                else:
+                    print(f"\n  Springer Research: ⚠️  Search failed")
+            elif status == "no_results":
+                print(f"\n  Springer Research: ℹ️  No papers found matching your query")
+            else:
+                print(f"\n  Springer Research: ℹ️  Search status: {status}")
+            
             print(f"\n  Feedback ID       : {feedback_id}")
             print(f"  (Type 'feedback {feedback_id} <your issue>' to report a problem)")
-
 
         # ── Agent logs (only when requested) ────────────────────────────
         if show_logs and result.get("agent_reasoning_traces"):
@@ -241,13 +271,12 @@ class ConstitutionalLawCLI:
     def interactive_mode(self):
         """Run interactive query mode."""
         print("\n" + "="*60)
-        print("CONSTITUTIONAL LAW RESEARCH SYSTEM")
-        print("AutoGen Multi-Agent | Indian Jurisdiction Only")
+        print("Aram")
         print("="*60)
         if self.show_logs:
             print("Logs: ENABLED (global)")
         print("\nCommands: 'quit' to exit, 'help' for info")
-        print("Inline flags: append --report, --pdf, --logs to any query")
+        print("Inline flags: append --report, --pdf, --draft, --research, --logs to any query")
         print("-"*60)
 
         while True:
@@ -267,7 +296,7 @@ class ConstitutionalLawCLI:
                     continue
 
                 # Parse inline flags
-                query, want_report, want_pdf, want_draft, logs_override = self._parse_inline_flags(raw)
+                query, want_report, want_pdf, want_draft, logs_override, want_research = self._parse_inline_flags(raw)
                 if not query:
                     print("[Error] Empty query after stripping flags.")
                     continue
@@ -275,7 +304,7 @@ class ConstitutionalLawCLI:
                 show_logs_this = self.show_logs or logs_override
 
                 result = self.process_query(query, want_report=want_report, want_pdf=want_pdf,
-                                            want_draft=want_draft, show_logs=show_logs_this)
+                                            want_draft=want_draft, show_logs=show_logs_this, want_research=want_research)
                 self.display_result(result, show_logs=show_logs_this)
 
                 # Remember query for this feedback_id so feedback loop has context
@@ -334,6 +363,7 @@ Inline Flags (append to any query):
   --report              Generate a full structured legal report
   --pdf                 Generate a full report AND save it as a PDF file
   --draft [type]        Generate a legal document draft
+  --research            Include academic papers from Springer Nature in research
   --logs                Show detailed agent logs for this query
 
 Draft Types (use with --draft):
@@ -361,6 +391,7 @@ Example Queries:
   Explain Right to Equality --report
   What are Fundamental Rights? --pdf
   Explain judicial review in India --logs
+  Provide research papers on money laundering --research
   Draft a petition for Article 21 violation --draft writ
   File an RTI about police encounters --draft rti
   Send a legal notice for breach of contract --draft notice
