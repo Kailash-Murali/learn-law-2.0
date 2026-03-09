@@ -87,8 +87,9 @@ class ResearchAdapter:
 
         want_research = mode == "[research]"
         want_draft = draft_type if mode == "[draft]" else None
-        want_report = mode == "[reports]"
-        want_pdf = mode == "[reports]"
+        # [research] combines Springer papers + full report + PDF in one response
+        want_report = mode in ("[research]", "[reports]")
+        want_pdf = mode in ("[research]", "[reports]")
 
         try:
             raw = self._system.run_research(

@@ -6,7 +6,13 @@ import './globals.css'
 
 export const metadata: Metadata = {
   title: 'அறம்',
-  description: 'Created with the help of v0 & Claude Sonnet'
+  description: 'Created with the help of v0 & Claude Sonnet',
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: '32x32', type: 'image/x-icon' },
+      { url: '/icon.svg', type: 'image/svg+xml' },
+    ],
+  },
 }
 
 export default function RootLayout({

@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button"
 const MODES = [
   { label: "Research", tag: "[research]" },
   { label: "Draft",    tag: "[draft]" },
-  { label: "Reports",  tag: "[reports]" },
 ] as const
 
 const DRAFT_TYPES = [

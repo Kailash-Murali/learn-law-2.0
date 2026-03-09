@@ -454,6 +454,9 @@ class UIFormatter:
         for statute, url in val.get("statute_links", {}).items():
             statutes.append({"name": statute, "url": url, "verified": url is not None})
 
+        # Academic papers from Springer (populated when want_research=True)
+        springer_papers = result.get("research", {}).get("springer_papers", [])
+
         # Determine content type and text
         doc_type = doc.get("type", "simple_answer")
         if doc_type == "legal_draft":
@@ -485,6 +488,8 @@ class UIFormatter:
                 "flags": val.get("flags", []),
             },
             "pdf_path": result.get("pdf_path"),
+            "springer_papers": springer_papers,
+            "contrastive": result.get("contrastive", {}),
         }
 
 
@@ -687,6 +692,15 @@ class Coordinator:
                 )
                 if show_logs:
                     print("✅ Answer generated\n")
+
+            # ── Step 4b: Contrastive / counterfactual XAI ────────────────
+            try:
+                result["contrastive"] = self.documentation_agent.generate_counterfactuals(
+                    query, research_for_doc
+                )
+            except Exception as _cf_exc:
+                _logging.getLogger(__name__).warning("Counterfactual analysis failed: %s", _cf_exc)
+                result["contrastive"] = {}
 
             result["status"] = "completed"
 

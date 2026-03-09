@@ -9,6 +9,7 @@ Run:
 from __future__ import annotations
 
 import logging
+import json
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -70,6 +71,13 @@ class HealthResponse(BaseModel):
 
 class ErrorDetail(BaseModel):
     detail: str
+
+
+class FeedbackRequest(BaseModel):
+    message_id: str
+    vote: str = Field(..., pattern="^(up|down)$")
+    comment: Optional[str] = None
+    query: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -199,3 +207,28 @@ async def download_file(path: str = Query(..., description="Server-side file pat
     if not os.path.isfile(resolved):
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(resolved, filename=os.path.basename(resolved))
+
+
+# ---------------------------------------------------------------------------
+#  Feedback
+# ---------------------------------------------------------------------------
+
+FEEDBACK_FILE = "feedback_log.jsonl"
+
+
+@app.post("/api/feedback", tags=["feedback"])
+async def submit_feedback(body: FeedbackRequest):
+    """Append user feedback to the feedback log for future context injection."""
+    entry = {
+        "query": body.query or "",
+        "issue": body.comment or "",
+        "vote": body.vote,
+        "message_id": body.message_id,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+    try:
+        with open(FEEDBACK_FILE, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry) + "\n")
+    except Exception as exc:
+        logger.warning("Could not write feedback: %s", exc)
+    return {"status": "ok"}

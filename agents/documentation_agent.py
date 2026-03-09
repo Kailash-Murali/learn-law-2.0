@@ -7,6 +7,7 @@ Supports three output modes:
 """
 
 import re
+import json
 import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime
@@ -237,3 +238,36 @@ Make it professional and well-structured."""
         except Exception as e:
             _logger.error(f"PDF generation failed: {e}")
             return None
+
+    # ------------------------------------------------------------------ #
+    #  Contrastive / Counterfactual XAI analysis                          #
+    # ------------------------------------------------------------------ #
+    def generate_counterfactuals(self, query: str, research_summary) -> dict:
+        """Generate contrastive and counterfactual analysis for XAI transparency."""
+        if not isinstance(research_summary, str):
+            research_summary = str(research_summary)
+        prompt = (
+            "Analyse this legal query contrastively and counterfactually.\n\n"
+            f"Query: {query}\n"
+            f"Research context: {research_summary[:1500]}\n\n"
+            "Return a JSON object with exactly these keys:\n"
+            '- "contrastive_points": list of 2-3 strings explaining what distinguishes '
+            "this legal position from common alternative positions\n"
+            '- "counterfactuals": list of 2-3 strings, each starting with '
+            '"If [condition] were different, [outcome] would change because [reason]"\n'
+            '- "key_distinctions": list of 2-3 strings identifying the key legal factors '
+            "that determine the outcome\n\n"
+            "Return JSON only — no markdown fences, no other text."
+        )
+        try:
+            response = self._call_llm(prompt)
+            clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", response.strip(), flags=re.DOTALL)
+            parsed = json.loads(clean)
+            return {
+                "contrastive_points": [str(p) for p in parsed.get("contrastive_points", [])],
+                "counterfactuals": [str(c) for c in parsed.get("counterfactuals", [])],
+                "key_distinctions": [str(d) for d in parsed.get("key_distinctions", [])],
+            }
+        except Exception as exc:
+            _logger.warning("Counterfactual generation failed: %s", exc)
+            return {"contrastive_points": [], "counterfactuals": [], "key_distinctions": []}

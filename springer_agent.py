@@ -281,6 +281,16 @@ class SpringerAgent:
 
         return f'("{query}") {legal_terms} {keyword_str}'
 
+    def _safe_str(self, value: Any, fallback: str = "") -> str:
+        """Coerce any value to a plain string (some Springer fields are dicts/lists)."""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            return " ".join(str(v) for v in value.values() if v)
+        if isinstance(value, list):
+            return " ".join(str(v) for v in value if v)
+        return fallback if not value else str(value)
+
     def _parse_meta_response(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Parse Springer Meta API JSON response."""
         papers = []
@@ -289,13 +299,15 @@ class SpringerAgent:
             records = data.get("records", [])
             for record in records:
                 paper = {
-                    "title": record.get("title", "N/A"),
+                    "title": self._safe_str(record.get("title"), "N/A"),
                     "authors": self._extract_authors(record.get("creators", [])),
-                    "publication_date": record.get("publicationDate", "N/A"),
-                    "doi": record.get("doi", ""),
-                    "abstract": record.get("abstract", ""),
-                    "url": record.get("url", [{}])[0].get("value", "") if record.get("url") else "",
-                    "journal": record.get("publicationName", ""),
+                    "publication_date": self._safe_str(record.get("publicationDate"), "N/A"),
+                    "doi": self._safe_str(record.get("doi")),
+                    "abstract": self._safe_str(record.get("abstract")),
+                    "url": self._safe_str(
+                        record.get("url", [{}])[0].get("value", "") if record.get("url") else ""
+                    ),
+                    "journal": self._safe_str(record.get("publicationName")),
                     "source": "Springer Meta API",
                     "full_text_available": False,  # Meta API doesn't have full-text
                 }
@@ -315,16 +327,18 @@ class SpringerAgent:
             records = data.get("records", [])
             for record in records:
                 paper = {
-                    "title": record.get("title", "N/A"),
+                    "title": self._safe_str(record.get("title"), "N/A"),
                     "authors": self._extract_authors(record.get("creators", [])),
-                    "publication_date": record.get("publicationDate", "N/A"),
-                    "doi": record.get("doi", ""),
-                    "abstract": record.get("abstract", ""),
-                    "url": record.get("url", [{}])[0].get("value", "") if record.get("url") else "",
-                    "journal": record.get("publicationName", ""),
+                    "publication_date": self._safe_str(record.get("publicationDate"), "N/A"),
+                    "doi": self._safe_str(record.get("doi")),
+                    "abstract": self._safe_str(record.get("abstract")),
+                    "url": self._safe_str(
+                        record.get("url", [{}])[0].get("value", "") if record.get("url") else ""
+                    ),
+                    "journal": self._safe_str(record.get("publicationName")),
                     "source": "Springer OpenAccess API",
                     "full_text_available": True,  # OpenAccess = full-text available
-                    "content_type": record.get("contentType", ""),
+                    "content_type": self._safe_str(record.get("contentType")),
                 }
                 if paper["title"] != "N/A":
                     papers.append(paper)

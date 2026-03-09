@@ -7,37 +7,19 @@ const CARDS = [
   {
     title: "Query Modes",
     body: (
-      <table className="w-full text-xs text-left">
-        <thead>
-          <tr className="border-b border-background/10">
-            <th className="pb-1.5 pr-3 text-background/50 font-medium">Mode</th>
-            <th className="pb-1.5 text-background/50 font-medium">What it does</th>
-          </tr>
-        </thead>
-        <tbody className="text-background/70">
-          <tr className="border-b border-background/5">
-            <td className="py-1.5 pr-3 font-medium text-background/90">Research</td>
-            <td className="py-1.5">Retrieves peer-reviewed Springer links relevant to your query</td>
-          </tr>
-          <tr className="border-b border-background/5">
-            <td className="py-1.5 pr-3 font-medium text-background/90">Draft</td>
-            <td className="py-1.5">Produces a ready-to-use legal draft you can download as Word</td>
-          </tr>
-          <tr>
-            <td className="py-1.5 pr-3 font-medium text-background/90">Reports</td>
-            <td className="py-1.5">Generates a structured legal report downloadable as PDF</td>
-          </tr>
-        </tbody>
-      </table>
+      <ul className="space-y-2 text-xs text-background/70">
+        <li><span className="font-medium text-background/90">Research</span> — finds relevant Springer peer-reviewed papers and generates a full report + PDF.</li>
+        <li><span className="font-medium text-background/90">Draft</span> — produces a ready-to-use legal draft downloadable as Word.</li>
+        <li><span className="font-medium text-background/90">Ask</span> — quick conversational answer with cited sources.</li>
+      </ul>
     ),
   },
   {
     title: "Explainability",
     body: (
       <ul className="space-y-2 text-xs text-background/70">
-        <li><span className="font-medium text-background/90">Grounding check</span> — verifies if the answer is supported by cited sources.</li>
+        <li><span className="font-medium text-background/90">Grounding check</span> — verifies the answer is supported by cited sources.</li>
         <li><span className="font-medium text-background/90">Risk scoring</span> — numeric score &amp; label based on citation quality.</li>
-        <li><span className="font-medium text-background/90">Citation verification</span> — each statute/case verified individually.</li>
         <li><span className="font-medium text-background/90">Repealed law detection</span> — flags struck-down or unconstitutional laws.</li>
       </ul>
     ),
@@ -45,11 +27,11 @@ const CARDS = [
   {
     title: "How to Use",
     body: (
-      <p className="text-xs text-background/70 leading-relaxed">
-        Select a query mode — Research, Draft, or Reports — then type your question and press send.
-        Expand the &ldquo;Sources &amp; Validation&rdquo; panel below each answer to inspect cited sources,
-        grounding status, and risk scores before relying on the output.
-      </p>
+      <ul className="space-y-2 text-xs text-background/70">
+        <li>Select a mode prefix — <span className="font-medium text-background/90">[research]</span> or <span className="font-medium text-background/90">[draft]</span> — or just type freely.</li>
+        <li>Expand <span className="font-medium text-background/90">Sources &amp; Validation</span> below each answer to inspect citations and risk scores.</li>
+        <li>Use the <span className="font-medium text-background/90">thumb buttons</span> on each reply to send feedback.</li>
+      </ul>
     ),
   },
 ] as const
@@ -95,7 +77,9 @@ export function AboutPopover() {
             <h3 className="text-sm font-semibold text-background mb-2">
               {CARDS[page].title}
             </h3>
-            {CARDS[page].body}
+            <div className="h-[130px] overflow-y-auto">
+              {CARDS[page].body}
+            </div>
           </div>
 
           <div className="flex items-center justify-between px-4 py-2 border-t border-background/10">
@@ -110,10 +94,12 @@ export function AboutPopover() {
 
             <div className="flex items-center gap-1.5">
               {CARDS.map((_, i) => (
-                <span
+                <button
                   key={i}
-                  className={`size-1.5 rounded-full transition-colors ${
-                    i === page ? "bg-background/70" : "bg-background/20"
+                  onClick={() => setPage(i)}
+                  aria-label={`Go to page ${i + 1}`}
+                  className={`size-1.5 rounded-full transition-colors cursor-pointer ${
+                    i === page ? "bg-background/70" : "bg-background/20 hover:bg-background/40"
                   }`}
                 />
               ))}

@@ -5,6 +5,8 @@ import { CornerIcons } from "@/components/learn-law/corner-icons"
 import { Hero } from "@/components/learn-law/hero"
 import { ChatInput } from "@/components/learn-law/chat-input"
 import { ValidationPanel, type ValidationData } from "@/components/learn-law/validation-panel"
+import { SpringerPapersPanel } from "@/components/learn-law/springer-papers-panel"
+import { ContrastivePanel } from "@/components/learn-law/contrastive-panel"
 import { Scale, Copy, Check, ThumbsUp, ThumbsDown, Pencil, Download, FileDown } from "lucide-react"
 import { AboutPopover } from "@/components/learn-law/about-popover"
 
@@ -17,6 +19,7 @@ export interface Message {
   pdfPath?: string | null
   docxPath?: string | null
   uiPayload?: Record<string, any> | null
+  contrastive?: Record<string, any> | null
 }
 
 export interface ChatSession {
@@ -260,6 +263,7 @@ export default function Page() {
   function formatBackendResponse(data: Record<string, any>): {
     text: string
     uiPayload: Record<string, any> | null
+    contrastive: Record<string, any> | null
   } {
     const ui = data.ui_payload as Record<string, any> | undefined
     const doc = data.documentation as Record<string, any> | undefined
@@ -273,7 +277,11 @@ export default function Page() {
       data.error ??
       "No results returned."
 
-    return { text: mainText, uiPayload: ui ?? null }
+    return {
+      text: mainText,
+      uiPayload: ui ?? null,
+      contrastive: (ui?.contrastive as Record<string, any>) ?? null,
+    }
   }
 
   // ── State ────────────────────────────────────────────────
@@ -314,7 +322,7 @@ export default function Page() {
       })
       .then((data) => {
         setThinking(false)
-        const { text: respText, uiPayload } = formatBackendResponse(data)
+        const { text: respText, uiPayload, contrastive } = formatBackendResponse(data)
         const assistantMsg: Message = {
           id: (Date.now() + 1).toString(),
           role: "assistant",
@@ -324,6 +332,7 @@ export default function Page() {
           pdfPath: data.pdf_path ?? null,
           docxPath: data.docx_path ?? null,
           uiPayload,
+          contrastive,
         }
         const finalMessages = [...priorMessages, assistantMsg]
         setMessages(finalMessages)
@@ -378,21 +387,36 @@ export default function Page() {
     const idx = messages.findIndex((m) => m.id === msgId)
     if (idx === -1) return
     const updatedMsg: Message = { ...messages[idx], text: newText }
-    const truncated = [...messages.slice(0, idx), updatedMsg]
-    setMessages(truncated)
+    const updated = messages.map((m, i) => (i === idx ? updatedMsg : m))
+    setMessages(updated)
     setEditingId(null)
     const sid = sessionIdRef.current
     if (sid) {
       setSessions((prev) =>
-        prev.map((s) => s.id === sid ? { ...s, messages: truncated } : s)
+        prev.map((s) => s.id === sid ? { ...s, messages: updated } : s)
       )
-      callApi(newText, truncated, sid)
+      callApi(newText, updated, sid)
     }
   }
 
-  function handleFeedback(id: string, entry: FeedbackEntry) {
+  async function handleFeedback(id: string, entry: FeedbackEntry) {
     setFeedbackLog((prev) => ({ ...prev, [id]: entry }))
-    // Future: POST /api/feedback with { messageId: id, ...entry }
+    const idx = messages.findIndex((m) => m.id === id)
+    const query = idx > 0 ? (messages[idx - 1]?.text ?? null) : null
+    try {
+      await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message_id: id,
+          vote: entry.vote,
+          comment: entry.comment ?? null,
+          query,
+        }),
+      })
+    } catch {
+      // silent — feedback failure must not disrupt the UX
+    }
   }
 
   function loadSession(session: ChatSession) {
@@ -465,7 +489,9 @@ export default function Page() {
           </section>
         ) : (
           <section className="mx-auto w-full max-w-[min(860px,100%)] px-4 sm:px-8 py-6 flex flex-col gap-2 sm:gap-4">
-            {messages.map((msg) => (
+            {messages.map((msg, msgIdx) => {
+              const isLastUserMsg = msg.role === "user" && !messages.slice(msgIdx + 1).some((m) => m.role === "user")
+              return (
               <div
                 key={msg.id}
                 className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
@@ -477,7 +503,7 @@ export default function Page() {
                 {msg.role === "user" ? (
                   /* ── User bubble ── */
                   <div className="max-w-[85%] sm:max-w-[88%] group">
-                    {editingId === msg.id ? (
+                    {isLastUserMsg && editingId === msg.id ? (
                       /* Edit mode */
                       <div className="rounded-2xl rounded-br-sm bg-background/10 px-4 py-3 space-y-2">
                         <textarea
@@ -509,6 +535,7 @@ export default function Page() {
                     ) : (
                       /* Display mode */
                       <div className="relative flex items-start gap-1.5">
+                        {isLastUserMsg && (
                         <button
                           onClick={() => { setEditingId(msg.id); setEditText(msg.text) }}
                           aria-label="Edit message"
@@ -516,6 +543,7 @@ export default function Page() {
                         >
                           <Pencil className="size-3.5" aria-hidden />
                         </button>
+                        )}
                         <div className="rounded-2xl rounded-br-sm bg-background text-foreground px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap">
                           {msg.text}
                         </div>
@@ -536,11 +564,15 @@ export default function Page() {
                     </div>
                     {/* Mode-specific actions */}
                     {msg.mode === "[draft]" && <DraftActions text={msg.text} docxPath={msg.docxPath} />}
-                    {msg.mode === "[reports]" && <ReportActions text={msg.text} pdfPath={msg.pdfPath} />}
+                    {msg.mode === "[research]" && <ReportActions text={msg.text} pdfPath={msg.pdfPath} />}
+                    <ContrastivePanel data={msg.contrastive} />
                     {msg.uiPayload?.validation && (
                       <ValidationPanel
                         validation={msg.uiPayload.validation as ValidationData}
                       />
+                    )}
+                    {Array.isArray(msg.uiPayload?.springer_papers) && msg.uiPayload.springer_papers.length > 0 && (
+                      <SpringerPapersPanel papers={msg.uiPayload.springer_papers} />
                     )}
                     <ThumbsFeedback
                       messageId={msg.id}
@@ -549,7 +581,8 @@ export default function Page() {
                   </div>
                 )}
               </div>
-            ))}
+              )
+            })}
             {thinking && <MessageSkeleton />}
             <div ref={bottomRef} />
           </section>
