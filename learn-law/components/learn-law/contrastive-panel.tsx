@@ -15,10 +15,10 @@ interface ContrastivePanelProps {
   className?: string
 }
 
-const SECTIONS: { key: keyof ContrastiveData; label: string; color: string }[] = [
-  { key: "contrastive_points",  label: "Distinguishing factors",    color: "text-sky-400" },
-  { key: "counterfactuals",     label: "Counterfactual scenarios",  color: "text-amber-400" },
-  { key: "key_distinctions",    label: "Key legal distinctions",    color: "text-emerald-400" },
+const SECTIONS: { key: keyof ContrastiveData; label: string}[] = [
+  { key: "contrastive_points",  label: "Distinguishing factors"},
+  { key: "counterfactuals",     label: "Counterfactual scenarios"},
+  { key: "key_distinctions",    label: "Key legal distinctions"},
 ]
 
 export function ContrastivePanel({ data, className }: ContrastivePanelProps) {
@@ -44,8 +44,8 @@ export function ContrastivePanel({ data, className }: ContrastivePanelProps) {
         aria-expanded={open}
         aria-label="Contrastive and counterfactual analysis"
       >
-        <Scale className="size-4 shrink-0 text-background/40" aria-hidden />
-        <span className="flex-1 text-xs font-medium text-background/50">Contrastive Analysis</span>
+        <Scale className="size-5 shrink-0 text-background/40" aria-hidden />
+        <span className="flex-1 text-sm font-medium text-background/80">Contrastive Analysis</span>
         <span className="text-[10px] text-background/30 mr-2">{totalPoints} points</span>
         <ChevronRight
           className={cn(
@@ -58,12 +58,12 @@ export function ContrastivePanel({ data, className }: ContrastivePanelProps) {
 
       {open && (
         <div className="border-t border-background/10 px-3 py-2 space-y-3 animate-in fade-in slide-in-from-top-1 duration-200">
-          {SECTIONS.map(({ key, label, color }) => {
+          {SECTIONS.map(({ key, label }) => {
             const items = data[key] as string[] | undefined
             if (!items || items.length === 0) return null
             return (
               <div key={key}>
-                <p className={cn("text-[10px] font-semibold uppercase tracking-wider mb-1", color)}>
+                <p className={cn("text-[12px] font-semibold uppercase tracking-wider mb-1")}>
                   {label}
                 </p>
                 <ul className="space-y-1.5">

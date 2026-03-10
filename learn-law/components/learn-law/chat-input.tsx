@@ -6,8 +6,9 @@ import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 
 const MODES = [
-  { label: "Research", tag: "[research]" },
-  { label: "Draft",    tag: "[draft]" },
+  { label: "Research",   tag: "[research]" },
+  { label: "Draft",      tag: "[draft]" },
+  { label: "Contrastive", tag: "[contrastive]" },
 ] as const
 
 const DRAFT_TYPES = [
@@ -20,6 +21,9 @@ const DRAFT_TYPES = [
 ] as const
 
 type ModeTag = (typeof MODES)[number]["tag"] | null
+
+// Keep draft sub-menu out of non-draft modes
+const DRAFT_ONLY_MODE: ModeTag = "[draft]"
 
 interface ChatInputProps {
   onSend: (text: string, mode: string | null, draftType?: string | null) => void
@@ -78,7 +82,7 @@ export function ChatInput({ onSend, isLoading = false }: ChatInputProps) {
       />
 
       {/* ── Draft sub-menu (only when Draft mode is active) ── */}
-      {activeMode === "[draft]" && (
+      {activeMode === DRAFT_ONLY_MODE && (
         <div className="flex items-center gap-1.5 px-3 pb-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {DRAFT_TYPES.map((dt) => (
             <button

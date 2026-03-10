@@ -337,53 +337,64 @@ CONFIDENTIALITY NOTES:
 
     def _parse_bad_law_analysis_response(self, response: str) -> List[Dict[str, Any]]:
         """
-        Parse LLM response for bad law analysis.
-        
-        Extracts JSON array from response and validates structure.
-        Handles trailing whitespace and extraneous text after JSON.
+        Robustly parse LLM response for bad law analysis.
+
+        Strategy:
+          1. Strip markdown fences and find the outermost '[' ... ']'.
+          2. Try direct json.loads.
+          3. If that fails, extract complete individual objects with regex and
+             re-assemble a valid list — handles truncated/malformed JSON.
         """
+        # Strip markdown fences
+        clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", response.strip(), flags=re.DOTALL)
+
+        # Locate the outermost array
         try:
-            # Try to find JSON array in response
-            bracket_start = response.index("[")
-            bracket_end = response.rindex("]") + 1
-            json_str = response[bracket_start:bracket_end].strip()
-            
-            # Attempt to parse JSON
-            parsed = json.loads(json_str)
-            
-            if not isinstance(parsed, list):
-                _logger.warning(f"Bad law analysis response is not a list: {type(parsed)}")
-                return []
-            
-            return parsed
-            
-        except json.JSONDecodeError as e:
-            # If standard parsing fails, try incremental approach
-            # Start from "[" and scan forward to find valid JSON endpoint
-            try:
-                bracket_start = response.index("[")
-                # Try parsing progressively longer substrings from the start
-                for i in range(len(response), bracket_start, -1):
-                    candidate = response[bracket_start:i].strip()
-                    if not candidate.endswith("]"):
-                        continue
-                    try:
-                        parsed = json.loads(candidate)
-                        if isinstance(parsed, list):
-                            _logger.debug(f"Successfully parsed bad law response with incremental approach at position {i}")
-                            return parsed
-                    except json.JSONDecodeError:
-                        continue
-                
-                _logger.warning(f"Failed to parse bad law analysis JSON (incremental approach exhausted): {e}")
-                return []
-                
-            except (ValueError, json.JSONDecodeError) as inner_e:
-                _logger.warning(f"Failed to parse bad law analysis JSON (both methods): {inner_e}")
-                return []
-        except (ValueError, IndexError) as e:
-            _logger.warning(f"Failed to locate JSON array in bad law response: {e}")
+            bracket_start = clean.index("[")
+        except ValueError:
+            _logger.warning("Bad law analysis: no JSON array found in response")
             return []
+
+        # Attempt 1: full parse between first '[' and last ']'
+        try:
+            bracket_end = clean.rindex("]") + 1
+            parsed = json.loads(clean[bracket_start:bracket_end])
+            if isinstance(parsed, list):
+                return parsed
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # Attempt 2: extract each complete {...} object separately and build list
+        # This handles truncated arrays where the closing ']' is missing or the
+        # last object is cut off.
+        objects: List[Dict[str, Any]] = []
+        depth = 0
+        start = None
+        for idx, ch in enumerate(clean):
+            if ch == "{":
+                if depth == 0:
+                    start = idx
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0 and start is not None:
+                    fragment = clean[start : idx + 1]
+                    try:
+                        obj = json.loads(fragment)
+                        if isinstance(obj, dict):
+                            objects.append(obj)
+                    except json.JSONDecodeError:
+                        pass
+                    start = None
+
+        if objects:
+            _logger.debug(
+                "Bad law analysis: recovered %d object(s) via fragment extraction", len(objects)
+            )
+            return objects
+
+        _logger.warning("Bad law analysis: could not parse JSON from response")
+        return []
 
     def _flatten_bad_law_findings(self, bad_laws_by_case: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """

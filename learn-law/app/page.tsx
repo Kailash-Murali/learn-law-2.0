@@ -29,19 +29,44 @@ export interface ChatSession {
   createdAt: Date
 }
 
-// ── Skeleton shimmer ─────────────────────────────────────────────────────────
-function MessageSkeleton() {
+// ── Thinking indicator ────────────────────────────────────────────────────────
+function ThinkingIndicator() {
   return (
     <div className="flex justify-start" aria-label="Loading response" aria-busy="true">
       <Scale className="size-4 mt-1 mr-2 shrink-0 text-background/60 animate-pulse" aria-hidden />
-      <div className="max-w-[78%] w-64 space-y-2.5 pt-1">
-        <div className="h-3.5 w-2/5 rounded-full bg-background/15 animate-pulse" />
-        <div className="h-3 w-full rounded-full bg-background/10 animate-pulse" />
-        <div className="h-3 w-4/5 rounded-full bg-background/10 animate-pulse" />
-        <div className="h-3 w-3/5 rounded-full bg-background/10 animate-pulse" />
+      <div className="rounded-2xl rounded-bl-sm bg-background/10 px-4 py-3">
+        <span className="text-sm text-background/60 font-medium">Thinking</span>
       </div>
     </div>
   )
+}
+
+// ── Typewriter text ──────────────────────────────────────────────────────────
+function TypewriterText({ text, speed = 8, onDone }: { text: string; speed?: number; onDone?: () => void }) {
+  const [displayed, setDisplayed] = useState("")
+  const [done, setDone] = useState(false)
+  const onDoneRef = useRef(onDone)
+  useEffect(() => { onDoneRef.current = onDone }, [onDone])
+
+  useEffect(() => {
+    setDisplayed("")
+    setDone(false)
+    let i = 0
+    const id = setInterval(() => {
+      // Reveal multiple characters per tick for long texts
+      const chunk = Math.max(1, Math.floor(text.length / 300))
+      i = Math.min(i + chunk, text.length)
+      setDisplayed(text.slice(0, i))
+      if (i >= text.length) {
+        clearInterval(id)
+        setDone(true)
+        onDoneRef.current?.()
+      }
+    }, speed)
+    return () => clearInterval(id)
+  }, [text, speed])
+
+  return <>{done ? text : displayed}</>
 }
 
 // ── Copy button ───────────────────────────────────────────────────────────────
@@ -292,6 +317,8 @@ export default function Page() {
   const [feedbackLog, setFeedbackLog] = useState<Record<string, FeedbackEntry>>({})
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState("")
+  const [newMsgId, setNewMsgId] = useState<string | null>(null)
+  const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set())
   const isChat = messages.length > 0 || thinking
   const bottomRef = useRef<HTMLDivElement>(null)
   // Use a ref so the setTimeout closure always has the latest session id
@@ -323,8 +350,10 @@ export default function Page() {
       .then((data) => {
         setThinking(false)
         const { text: respText, uiPayload, contrastive } = formatBackendResponse(data)
+        const asstId = (Date.now() + 1).toString()
+        setNewMsgId(asstId)
         const assistantMsg: Message = {
-          id: (Date.now() + 1).toString(),
+          id: asstId,
           role: "assistant",
           text: respText,
           mode,
@@ -387,7 +416,8 @@ export default function Page() {
     const idx = messages.findIndex((m) => m.id === msgId)
     if (idx === -1) return
     const updatedMsg: Message = { ...messages[idx], text: newText }
-    const updated = messages.map((m, i) => (i === idx ? updatedMsg : m))
+    // Truncate everything after this message so the new response replaces the old
+    const updated = [...messages.slice(0, idx), updatedMsg]
     setMessages(updated)
     setEditingId(null)
     const sid = sessionIdRef.current
@@ -423,12 +453,17 @@ export default function Page() {
     setActiveSessionId(session.id)
     setMessages(session.messages)
     setThinking(false)
+    setNewMsgId(null)
+    // All loaded messages are pre-revealed
+    setRevealedIds(new Set(session.messages.map((m) => m.id)))
   }
 
   function startNewChat() {
     setActiveSessionId(null)
     setMessages([])
     setThinking(false)
+    setNewMsgId(null)
+    setRevealedIds(new Set())
     sessionIdRef.current = null
   }
 
@@ -555,24 +590,30 @@ export default function Page() {
                   <div className="w-full flex flex-col group">
                     <div className="relative">
                       <div className="rounded-2xl rounded-bl-sm bg-background/10 text-background px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap">
-                        {msg.text}
+                        {msg.id === newMsgId
+                          ? <TypewriterText text={msg.text} onDone={() => setRevealedIds((prev) => new Set([...prev, msg.id]))} />
+                          : msg.text}
                       </div>
                       {/* Copy button – top-right corner, visible on hover */}
                       <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                         <CopyButton text={msg.text} />
                       </div>
                     </div>
-                    {/* Mode-specific actions */}
-                    {msg.mode === "[draft]" && <DraftActions text={msg.text} docxPath={msg.docxPath} />}
-                    {msg.mode === "[research]" && <ReportActions text={msg.text} pdfPath={msg.pdfPath} />}
-                    <ContrastivePanel data={msg.contrastive} />
-                    {msg.uiPayload?.validation && (
-                      <ValidationPanel
-                        validation={msg.uiPayload.validation as ValidationData}
-                      />
-                    )}
-                    {Array.isArray(msg.uiPayload?.springer_papers) && msg.uiPayload.springer_papers.length > 0 && (
-                      <SpringerPapersPanel papers={msg.uiPayload.springer_papers} />
+                    {/* Mode-specific actions and panels — revealed only after typewriter finishes */}
+                    {(revealedIds.has(msg.id) || msg.id !== newMsgId) && (
+                      <>
+                        {msg.mode === "[draft]" && <DraftActions text={msg.text} docxPath={msg.docxPath} />}
+                        {msg.mode === "[research]" && <ReportActions text={msg.text} pdfPath={msg.pdfPath} />}
+                        {msg.mode === "[contrastive]" && <ContrastivePanel data={msg.contrastive} />}
+                        {msg.uiPayload?.validation && (
+                          <ValidationPanel
+                            validation={msg.uiPayload.validation as ValidationData}
+                          />
+                        )}
+                        {Array.isArray(msg.uiPayload?.springer_papers) && msg.uiPayload.springer_papers.length > 0 && (
+                          <SpringerPapersPanel papers={msg.uiPayload.springer_papers} />
+                        )}
+                      </>
                     )}
                     <ThumbsFeedback
                       messageId={msg.id}
@@ -583,7 +624,7 @@ export default function Page() {
               </div>
               )
             })}
-            {thinking && <MessageSkeleton />}
+            {thinking && <ThinkingIndicator />}
             <div ref={bottomRef} />
           </section>
         )}

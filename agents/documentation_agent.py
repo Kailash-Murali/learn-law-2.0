@@ -260,7 +260,7 @@ Make it professional and well-structured."""
             "Return JSON only — no markdown fences, no other text."
         )
         try:
-            response = self._call_llm(prompt)
+            response = self.call_llm(prompt)
             clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", response.strip(), flags=re.DOTALL)
             parsed = json.loads(clean)
             return {

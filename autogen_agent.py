@@ -523,7 +523,8 @@ class Coordinator:
         want_pdf: bool = False,
         want_draft: str | None = None,
         show_logs: bool = False,
-        want_research: bool = False
+        want_research: bool = False,
+        want_contrastive: bool = False
     ) -> Dict[str, Any]:
         """Run the complete research workflow.
 
@@ -693,13 +694,16 @@ class Coordinator:
                 if show_logs:
                     print("✅ Answer generated\n")
 
-            # ── Step 4b: Contrastive / counterfactual XAI ────────────────
-            try:
-                result["contrastive"] = self.documentation_agent.generate_counterfactuals(
-                    query, research_for_doc
-                )
-            except Exception as _cf_exc:
-                _logging.getLogger(__name__).warning("Counterfactual analysis failed: %s", _cf_exc)
+            # ── Step 4b: Contrastive / counterfactual XAI (only when requested) ────
+            if want_contrastive:
+                try:
+                    result["contrastive"] = self.documentation_agent.generate_counterfactuals(
+                        query, research_for_doc
+                    )
+                except Exception as _cf_exc:
+                    _logging.getLogger(__name__).warning("Counterfactual analysis failed: %s", _cf_exc)
+                    result["contrastive"] = {}
+            else:
                 result["contrastive"] = {}
 
             result["status"] = "completed"
@@ -734,7 +738,8 @@ class AutoGenLegalResearch:
 
     def run_research(self, query: str, want_report: bool = False, want_pdf: bool = False,
                      want_draft: str | None = None,
-                     show_logs: bool = False, want_research: bool = False) -> Dict[str, Any]:
+                     show_logs: bool = False, want_research: bool = False,
+                     want_contrastive: bool = False) -> Dict[str, Any]:
         """Run research — concise answer by default; full report/PDF/draft on request."""
         return self.coordinator.run(
             query,
@@ -742,7 +747,8 @@ class AutoGenLegalResearch:
             want_pdf=want_pdf,
             want_draft=want_draft,
             show_logs=show_logs,
-            want_research=want_research
+            want_research=want_research,
+            want_contrastive=want_contrastive,
         )
 
     def parse_query(self, query: str) -> Dict[str, Any]:

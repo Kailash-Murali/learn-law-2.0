@@ -90,6 +90,7 @@ class ResearchAdapter:
         # [research] combines Springer papers + full report + PDF in one response
         want_report = mode in ("[research]", "[reports]")
         want_pdf = mode in ("[research]", "[reports]")
+        want_contrastive = mode == "[contrastive]"
 
         try:
             raw = self._system.run_research(
@@ -98,6 +99,7 @@ class ResearchAdapter:
                 want_report=want_report,
                 want_pdf=want_pdf,
                 want_draft=want_draft,
+                want_contrastive=want_contrastive,
             )
             return self._normalise(query, raw)
         except ConstitutionalLawException as exc:

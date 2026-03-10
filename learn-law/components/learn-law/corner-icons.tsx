@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { User, Plus, MessageSquare, Pencil, Trash2, Check, X } from "lucide-react"
+import { Menu, Plus, MessageSquare, Pencil, Trash2, Check, X } from "lucide-react"
 import Link from "next/link"
 import {
   Sheet,
@@ -147,7 +147,7 @@ export function CornerIcons({
           className="h-8 w-8 rounded-full hover:bg-background/10 focus-visible:ring-0 focus-visible:outline-none"
           aria-label="Open sidebar"
         >
-          <User className="size-4 text-background" aria-hidden />
+          <Menu className="size-4 text-background" aria-hidden />
           <span className="sr-only">Open sidebar</span>
         </Button>
       </SheetTrigger>

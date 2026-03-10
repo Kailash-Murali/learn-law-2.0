@@ -40,12 +40,13 @@ class ConstitutionalLawCLI:
     def _parse_inline_flags(self, raw_query: str):
         """
         Detect trailing inline flags in a query string.
-        Supported flags: --pdf, --report, --logs, --draft <type>, --research, --draft <type>
-        Returns (clean_query, want_report, want_pdf, want_draft, show_logs_override, want_research)
+        Supported flags: --pdf, --report, --logs, --draft <type>, --research, --contrastive
+        Returns (clean_query, want_report, want_pdf, want_draft, show_logs_override, want_research, want_contrastive)
         """
         want_pdf = False
         want_report = False
         want_research = False
+        want_contrastive = False
         want_draft: str | None = None
         show_logs_override = False
 
@@ -70,6 +71,8 @@ class ConstitutionalLawCLI:
                 want_report = True
             elif tok == "--research":
                 want_research = True
+            elif tok == "--contrastive":
+                want_contrastive = True
             elif tok == "--logs":
                 show_logs_override = True
             elif tok == "--draft":
@@ -84,17 +87,19 @@ class ConstitutionalLawCLI:
             i += 1
 
         clean_query = " ".join(remaining)
-        return clean_query, want_report, want_pdf, want_draft, show_logs_override, want_research
+        return clean_query, want_report, want_pdf, want_draft, show_logs_override, want_research, want_contrastive
 
     def process_query(self, query: str, want_report: bool = False,
                       want_pdf: bool = False, want_draft: str | None = None,
-                      show_logs: bool = False, want_research: bool = False) -> dict:
+                      show_logs: bool = False, want_research: bool = False,
+                      want_contrastive: bool = False) -> dict:
         """Process a legal research query."""
 
         try:
             result = self.research_system.run_research(
                 query, want_report=want_report, want_pdf=want_pdf,
-                want_draft=want_draft, show_logs=show_logs, want_research=want_research
+                want_draft=want_draft, show_logs=show_logs, want_research=want_research,
+                want_contrastive=want_contrastive,
             )
             return result
         except Exception as e:
@@ -151,6 +156,29 @@ class ConstitutionalLawCLI:
         if result.get("pdf_path"):
             print("\n" + "-"*70)
             print(f"📎 PDF saved to: {result['pdf_path']}")
+
+        # ── Contrastive / Counterfactual XAI ────────────────────────────
+        contrastive = result.get("contrastive") or {}
+        cp = contrastive.get("contrastive_points", [])
+        cf = contrastive.get("counterfactuals", [])
+        kd = contrastive.get("key_distinctions", [])
+        if cp or cf or kd:
+            print("\n" + "-"*70)
+            print("⚖  CONTRASTIVE ANALYSIS")
+            if cp:
+                print("\n  Distinguishing factors:")
+                for p in cp:
+                    print(f"    ▸ {p}")
+            if cf:
+                print("\n  Counterfactual scenarios:")
+                for c in cf:
+                    print(f"    ▸ {c}")
+            if kd:
+                print("\n  Key legal distinctions:")
+                for d in kd:
+                    print(f"    ▸ {d}")
+        else:
+            print("\n  Contrastive analysis: ⚠️  No data generated")
 
         # ── Validation summary (always shown) ────────────────────────────
         validation = result.get("validation", {})
@@ -276,7 +304,7 @@ class ConstitutionalLawCLI:
         if self.show_logs:
             print("Logs: ENABLED (global)")
         print("\nCommands: 'quit' to exit, 'help' for info")
-        print("Inline flags: append --report, --pdf, --draft, --research, --logs to any query")
+        print("Inline flags: append --report, --pdf, --draft, --research, --contrastive, --logs to any query")
         print("-"*60)
 
         while True:
@@ -296,7 +324,7 @@ class ConstitutionalLawCLI:
                     continue
 
                 # Parse inline flags
-                query, want_report, want_pdf, want_draft, logs_override, want_research = self._parse_inline_flags(raw)
+                query, want_report, want_pdf, want_draft, logs_override, want_research, want_contrastive = self._parse_inline_flags(raw)
                 if not query:
                     print("[Error] Empty query after stripping flags.")
                     continue
@@ -304,7 +332,8 @@ class ConstitutionalLawCLI:
                 show_logs_this = self.show_logs or logs_override
 
                 result = self.process_query(query, want_report=want_report, want_pdf=want_pdf,
-                                            want_draft=want_draft, show_logs=show_logs_this, want_research=want_research)
+                                            want_draft=want_draft, show_logs=show_logs_this,
+                                            want_research=want_research, want_contrastive=want_contrastive)
                 self.display_result(result, show_logs=show_logs_this)
 
                 # Remember query for this feedback_id so feedback loop has context
