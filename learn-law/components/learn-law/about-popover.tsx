@@ -8,9 +8,10 @@ const CARDS = [
     title: "Query Modes",
     body: (
       <ul className="space-y-2 text-xs text-background/70">
-        <li><span className="font-medium text-background/90">Research</span> — finds relevant Springer peer-reviewed papers and generates a full report + PDF.</li>
-        <li><span className="font-medium text-background/90">Draft</span> — produces a ready-to-use legal draft downloadable as Word.</li>
-        <li><span className="font-medium text-background/90">Ask</span> — quick conversational answer with cited sources.</li>
+        <li><span className="font-medium text-background/90">Research</span> — searches Springer peer-reviewed papers and generates a full PDF report.</li>
+        <li><span className="font-medium text-background/90">Draft</span> — produces a ready-to-file legal document (Word) across 6 types: Writ Petition, Legal Notice, RTI, Complaint, Affidavit, PIL.</li>
+        <li><span className="font-medium text-background/90">Contrastive</span> — comparative legal analysis with distinguishing factors, counterfactuals, and key distinctions.</li>
+        <li><span className="font-medium text-background/90">Query</span> — type without a prefix for a direct cited Q&amp;A answer.</li>
       </ul>
     ),
   },
@@ -18,9 +19,9 @@ const CARDS = [
     title: "Explainability",
     body: (
       <ul className="space-y-2 text-xs text-background/70">
-        <li><span className="font-medium text-background/90">Grounding check</span> — verifies the answer is supported by cited sources.</li>
-        <li><span className="font-medium text-background/90">Risk scoring</span> — numeric score &amp; label based on citation quality.</li>
-        <li><span className="font-medium text-background/90">Repealed law detection</span> — flags struck-down or unconstitutional laws.</li>
+        <li><span className="font-medium text-background/90">Grounding check</span> — verifies each claim is backed by cited sources.</li>
+        <li><span className="font-medium text-background/90">Citation verification</span> — checks that cited papers and statutes are valid and accessible.</li>
+        <li><span className="font-medium text-background/90">Repealed law alert</span> — flags struck-down or unconstitutional statutes automatically.</li>
       </ul>
     ),
   },
@@ -28,9 +29,10 @@ const CARDS = [
     title: "How to Use",
     body: (
       <ul className="space-y-2 text-xs text-background/70">
-        <li>Select a mode prefix — <span className="font-medium text-background/90">[research]</span> or <span className="font-medium text-background/90">[draft]</span> — or just type freely.</li>
-        <li>Expand <span className="font-medium text-background/90">Sources &amp; Validation</span> below each answer to inspect citations and risk scores.</li>
-        <li>Use the <span className="font-medium text-background/90">thumb buttons</span> on each reply to send feedback.</li>
+        <li>Tap <span className="font-medium text-background/90">Research</span>, <span className="font-medium text-background/90">Draft</span>, or <span className="font-medium text-background/90">Contrastive</span> chip below the input — or type freely for open Q&amp;A.</li>
+        <li>In Draft mode, choose a <span className="font-medium text-background/90">document type</span> from the sub-menu (Writ, RTI, PIL…) before sending.</li>
+        <li>Expand <span className="font-medium text-background/90">Sources &amp; Validation</span> below each reply to inspect citations and risk score.</li>
+        <li>Use <span className="font-medium text-background/90">thumb buttons</span> to give feedback; open the <span className="font-medium text-background/90">sidebar (☰)</span> to browse and manage chat history.</li>
       </ul>
     ),
   },
@@ -68,7 +70,7 @@ export function AboutPopover() {
         aria-label="About and features"
         className="p-0.5 rounded text-background/50 hover:text-background transition-colors"
       >
-        <Info className="size-4" aria-hidden />
+        <Info className="size-3" aria-hidden />
       </button>
 
       {open && (
@@ -77,7 +79,7 @@ export function AboutPopover() {
             <h3 className="text-sm font-semibold text-background mb-2">
               {CARDS[page].title}
             </h3>
-            <div className="h-[130px] overflow-y-auto">
+            <div className="h-[200px] overflow-y-auto">
               {CARDS[page].body}
             </div>
           </div>

@@ -7,8 +7,10 @@ import { ChatInput } from "@/components/learn-law/chat-input"
 import { ValidationPanel, type ValidationData } from "@/components/learn-law/validation-panel"
 import { SpringerPapersPanel } from "@/components/learn-law/springer-papers-panel"
 import { ContrastivePanel } from "@/components/learn-law/contrastive-panel"
+import { CotPanel } from "@/components/learn-law/cot-panel"
 import { Scale, Copy, Check, ThumbsUp, ThumbsDown, Pencil, Download, FileDown } from "lucide-react"
 import { AboutPopover } from "@/components/learn-law/about-popover"
+import { SentenceHighlighter } from "@/components/learn-law/sentence-highlighter"
 
 export interface Message {
   id: string
@@ -20,6 +22,7 @@ export interface Message {
   docxPath?: string | null
   uiPayload?: Record<string, any> | null
   contrastive?: Record<string, any> | null
+  agentTraces?: Record<string, any> | null
 }
 
 export interface ChatSession {
@@ -362,6 +365,7 @@ export default function Page() {
           docxPath: data.docx_path ?? null,
           uiPayload,
           contrastive,
+          agentTraces: data.agent_traces ?? null,
         }
         const finalMessages = [...priorMessages, assistantMsg]
         setMessages(finalMessages)
@@ -592,7 +596,12 @@ export default function Page() {
                       <div className="rounded-2xl rounded-bl-sm bg-background/10 text-background px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap">
                         {msg.id === newMsgId
                           ? <TypewriterText text={msg.text} onDone={() => setRevealedIds((prev) => new Set([...prev, msg.id]))} />
-                          : msg.text}
+                          : <SentenceHighlighter
+                              text={msg.text}
+                              citations={(
+                                msg.uiPayload?.validation as { citations?: { name: string; url?: string | null; verified?: boolean }[] } | undefined
+                              )?.citations}
+                            />}
                       </div>
                       {/* Copy button – top-right corner, visible on hover */}
                       <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -612,6 +621,12 @@ export default function Page() {
                         )}
                         {Array.isArray(msg.uiPayload?.springer_papers) && msg.uiPayload.springer_papers.length > 0 && (
                           <SpringerPapersPanel papers={msg.uiPayload.springer_papers} />
+                        )}
+                        {msg.agentTraces && Object.keys(msg.agentTraces).length > 0 && (
+                          <CotPanel
+                            traces={msg.agentTraces}
+                            validation={msg.uiPayload?.validation as Record<string, unknown> | undefined}
+                          />
                         )}
                       </>
                     )}

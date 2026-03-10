@@ -23,6 +23,10 @@ from pydantic import BaseModel, Field
 
 from cli_adapter import ResearchAdapter
 from config import Config
+from agents.shap_service import get_shap_service
+from agents.dice_service import get_dice_service
+from agents.attention_proxy_service import compute_attention_map
+from agents.surrogate_tree_service import get_surrogate_service
 
 # ---------------------------------------------------------------------------
 #  Logging
@@ -78,6 +82,27 @@ class FeedbackRequest(BaseModel):
     vote: str = Field(..., pattern="^(up|down)$")
     comment: Optional[str] = None
     query: Optional[str] = None
+    xai_feature_used: Optional[str] = None
+    time_spent_viewing_ms: Optional[int] = None
+    user_rating: Optional[int] = Field(None, ge=1, le=5)
+
+
+class ConfidenceBreakdownRequest(BaseModel):
+    law_text: str = Field(..., min_length=1, max_length=5000)
+    context: str = Field("", max_length=5000)
+
+
+class CounterfactualRequest(BaseModel):
+    case_features: Dict[str, Any]
+
+
+class AttentionMapRequest(BaseModel):
+    answer_sentences: List[str]
+    citations: List[Dict[str, str]]
+
+
+class SurrogateTreeRequest(BaseModel):
+    validation_features: Dict[str, float]
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +235,42 @@ async def download_file(path: str = Query(..., description="Server-side file pat
 
 
 # ---------------------------------------------------------------------------
+#  XAI Endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/xai/confidence-breakdown", tags=["xai"])
+async def confidence_breakdown(body: ConfidenceBreakdownRequest):
+    """Return SHAP-based explanation of bad-law confidence score."""
+    svc = get_shap_service()
+    return svc.explain(body.law_text, body.context)
+
+
+@app.post("/api/xai/counterfactuals", tags=["xai"])
+async def counterfactuals(body: CounterfactualRequest):
+    """Generate diverse counterfactual explanations via DiCE."""
+    svc = get_dice_service()
+    return svc.generate(body.case_features, k=3)
+
+
+@app.post("/api/xai/attention-map", tags=["xai"])
+async def attention_map(body: AttentionMapRequest):
+    """Return TF-IDF cosine similarity scores as attention proxy."""
+    citation_texts = [
+        {"name": c.get("name", ""), "url": c.get("url", ""), "text": c.get("text", c.get("name", ""))}
+        for c in body.citations
+    ]
+    return compute_attention_map(body.answer_sentences, citation_texts)
+
+
+@app.post("/api/xai/surrogate-tree", tags=["xai"])
+async def surrogate_tree(body: SurrogateTreeRequest):
+    """Return surrogate decision tree path for validation logic."""
+    svc = get_surrogate_service()
+    return svc.explain(body.validation_features)
+
+
+# ---------------------------------------------------------------------------
 #  Feedback
 # ---------------------------------------------------------------------------
 
@@ -219,16 +280,71 @@ FEEDBACK_FILE = "feedback_log.jsonl"
 @app.post("/api/feedback", tags=["feedback"])
 async def submit_feedback(body: FeedbackRequest):
     """Append user feedback to the feedback log for future context injection."""
-    entry = {
+    entry: Dict[str, Any] = {
         "query": body.query or "",
         "issue": body.comment or "",
         "vote": body.vote,
         "message_id": body.message_id,
         "timestamp": datetime.utcnow().isoformat(),
     }
+    if body.xai_feature_used:
+        entry["xai_feature_used"] = body.xai_feature_used
+    if body.time_spent_viewing_ms is not None:
+        entry["time_spent_viewing_ms"] = body.time_spent_viewing_ms
+    if body.user_rating is not None:
+        entry["user_rating"] = body.user_rating
     try:
         with open(FEEDBACK_FILE, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry) + "\n")
     except Exception as exc:
         logger.warning("Could not write feedback: %s", exc)
     return {"status": "ok"}
+
+
+@app.get("/api/telemetry/xai-summary", tags=["telemetry"])
+async def xai_telemetry_summary():
+    """Aggregated XAI feature telemetry from feedback log."""
+    import os
+    if not os.path.isfile(FEEDBACK_FILE):
+        return {"features": {}}
+
+    from collections import defaultdict
+    feature_stats: Dict[str, Dict[str, Any]] = defaultdict(
+        lambda: {"count": 0, "total_time_ms": 0, "ratings": []}
+    )
+    try:
+        with open(FEEDBACK_FILE, "r", encoding="utf-8") as fh:
+            for raw in fh:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    rec = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                feat = rec.get("xai_feature_used")
+                if not feat:
+                    continue
+                stats = feature_stats[feat]
+                stats["count"] += 1
+                t = rec.get("time_spent_viewing_ms")
+                if isinstance(t, (int, float)):
+                    stats["total_time_ms"] += t
+                r = rec.get("user_rating")
+                if isinstance(r, int):
+                    stats["ratings"].append(r)
+    except Exception as exc:
+        logger.warning("Telemetry read error: %s", exc)
+        return {"features": {}}
+
+    summary: Dict[str, Any] = {}
+    for feat, st in feature_stats.items():
+        avg_time = round(st["total_time_ms"] / st["count"]) if st["count"] else 0
+        ratings = st["ratings"]
+        acceptance = round(sum(1 for r in ratings if r >= 4) / len(ratings) * 100, 1) if ratings else None
+        summary[feat] = {
+            "view_count": st["count"],
+            "avg_time_ms": avg_time,
+            "acceptance_rate_pct": acceptance,
+        }
+    return {"features": summary}

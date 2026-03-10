@@ -1,9 +1,12 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { ChevronRight, Ban, ExternalLink } from "lucide-react"
+import { BarChart, Bar, XAxis, YAxis, Cell, ResponsiveContainer, Tooltip } from "recharts"
 import { cn } from "@/lib/utils"
 import { ConfidenceIndicator } from "./confidence-indicator"
+import { useXaiTelemetry } from "@/hooks/use-xai-telemetry"
+import { XaiMicroFeedback } from "./xai-micro-feedback"
 
 export interface BadLaw {
   law: string
@@ -14,6 +17,18 @@ export interface BadLaw {
   year?: number
   confidence?: "high" | "medium" | "low"
   discussion_only?: boolean
+}
+
+interface ShapFeature {
+  name: string
+  value: boolean
+  shap_value: number
+}
+
+interface ShapBreakdown {
+  base_value: number
+  features: ShapFeature[]
+  predicted_confidence: string
 }
 
 interface BadLawCardProps {
@@ -35,14 +50,104 @@ function getStatusConfig(status?: string) {
   return STATUS_CONFIG[status] ?? STATUS_CONFIG.struck_down_completely
 }
 
+// ── SHAP Waterfall skeleton ──────────────────────────────────────────
+function ShapSkeleton() {
+  return (
+    <div className="space-y-1.5 animate-pulse">
+      {[1, 2, 3, 4].map((i) => (
+        <div key={i} className="flex items-center gap-2">
+          <div className="h-3 w-28 rounded bg-background/10" />
+          <div className="h-3 flex-1 rounded bg-background/10" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── SHAP Waterfall chart ─────────────────────────────────────────────
+function ShapWaterfall({ data }: { data: ShapBreakdown }) {
+  const chartData = data.features
+    .filter((f) => Math.abs(f.shap_value) > 0.0001)
+    .map((f) => ({
+      name: f.name,
+      value: f.shap_value,
+    }))
+
+  if (chartData.length === 0) return null
+
+  return (
+    <div className="mt-2">
+      <span className="text-[10px] uppercase tracking-wider text-background/40 font-medium">
+        SHAP Feature Attribution
+      </span>
+      <ResponsiveContainer width="100%" height={chartData.length * 28 + 16}>
+        <BarChart data={chartData} layout="vertical" margin={{ left: 4, right: 12, top: 4, bottom: 4 }}>
+          <XAxis type="number" tick={{ fontSize: 9, fill: "rgba(255,255,255,0.4)" }} axisLine={false} tickLine={false} />
+          <YAxis
+            type="category"
+            dataKey="name"
+            width={140}
+            tick={{ fontSize: 9, fill: "rgba(255,255,255,0.5)" }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <Tooltip
+            contentStyle={{ background: "#1a1a2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11 }}
+            labelStyle={{ color: "rgba(255,255,255,0.7)" }}
+            formatter={(val: number) => [val.toFixed(4), "SHAP"]}
+          />
+          <Bar dataKey="value" radius={[0, 3, 3, 0]} barSize={14}>
+            {chartData.map((entry, idx) => (
+              <Cell key={idx} fill={entry.value >= 0 ? "#4ade80" : "#f87171"} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
 export function BadLawCard({ badLaw, defaultOpen = false }: BadLawCardProps) {
   const [open, setOpen] = useState(defaultOpen)
   const sc = getStatusConfig(badLaw.status)
   const confidence = badLaw.confidence ?? "medium"
   const isDicta = badLaw.discussion_only === true
+  const { onOpen, onClose } = useXaiTelemetry("shap_waterfall")
+
+  // SHAP breakdown state
+  const [shapData, setShapData] = useState<ShapBreakdown | null>(null)
+  const [shapLoading, setShapLoading] = useState(false)
+  const shapFetched = useRef(false)
 
   const currentYear = new Date().getFullYear()
   const yearsAgo = badLaw.year ? currentYear - badLaw.year : null
+
+  // Fetch SHAP breakdown on first expand
+  useEffect(() => {
+    if (open && !shapFetched.current) {
+      shapFetched.current = true
+      setShapLoading(true)
+      fetch("/api/xai/confidence-breakdown", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          law_text: `${badLaw.law} ${badLaw.reason ?? ""}`,
+          context: `${badLaw.case ?? ""} ${badLaw.status ?? ""} ${badLaw.year ?? ""}`,
+        }),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => { if (data) setShapData(data) })
+        .catch(() => {})
+        .finally(() => setShapLoading(false))
+    }
+  }, [open, badLaw])
+
+  function handleToggle() {
+    const next = !open
+    setOpen(next)
+    if (next) onOpen()
+    else onClose()
+  }
 
   return (
     <div
@@ -56,7 +161,7 @@ export function BadLawCard({ badLaw, defaultOpen = false }: BadLawCardProps) {
     >
       {/* ── Header (always visible) ── */}
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={handleToggle}
         className="flex w-full items-center gap-3 px-3 py-2.5 text-left cursor-pointer"
         aria-expanded={open}
         aria-label={`${badLaw.law} — ${sc.label}`}
@@ -138,6 +243,12 @@ export function BadLawCard({ badLaw, defaultOpen = false }: BadLawCardProps) {
               </p>
             </div>
           )}
+
+          {/* SHAP waterfall chart */}
+          {shapLoading && <ShapSkeleton />}
+          {shapData && <ShapWaterfall data={shapData} />}
+
+          <XaiMicroFeedback featureName="shap_waterfall" visible={open} />
         </div>
       )}
     </div>
