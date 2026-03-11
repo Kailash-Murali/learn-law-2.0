@@ -416,12 +416,96 @@ IMPORTANT: Do NOT use markdown formatting (**bold**, *italic*, etc). Use plain t
         }
 
 
+_LEGAL_FEATURE_SCHEMA = {
+    "is_mandatory_sentence": False,
+    "allows_judicial_discretion": False,
+    "cites_fundamental_rights": False,
+    "is_central_legislation": False,
+    "has_criminal_provision": False,
+    "applicable_act": "IPC",
+    "predicted_class": "upheld",
+}
+
+
+def extract_legal_features(user_query: str) -> dict:
+    """Call Groq to extract structured binary/categorical legal facts.
+
+    Returns a dict with exactly the keys in ``_LEGAL_FEATURE_SCHEMA``.
+    On any failure falls back to safe defaults.
+    """
+    try:
+        client = Groq(api_key=Config.GROQ_API_KEY)
+        resp = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            temperature=0,
+            max_tokens=300,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a legal feature extractor. Given a user query about Indian law, "
+                        "output ONLY a JSON object with exactly these keys and types:\n"
+                        '  "is_mandatory_sentence": bool,\n'
+                        '  "allows_judicial_discretion": bool,\n'
+                        '  "cites_fundamental_rights": bool,\n'
+                        '  "is_central_legislation": bool,\n'
+                        '  "has_criminal_provision": bool,\n'
+                        '  "applicable_act": str (e.g. "IPC", "IT Act", "Constitution"),\n'
+                        '  "predicted_class": str (ONLY "struck_down" OR "upheld")\n'
+                        "No markdown, no explanation — output raw JSON only."
+                    ),
+                },
+                {"role": "user", "content": user_query},
+            ],
+        )
+        raw = resp.choices[0].message.content.strip()
+        # Strip markdown fences if present
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        parsed = json.loads(raw)
+        # Enforce schema
+        result = dict(_LEGAL_FEATURE_SCHEMA)
+        for k in _LEGAL_FEATURE_SCHEMA:
+            if k in parsed:
+                result[k] = parsed[k]
+        # Force predicted_class to binary
+        if result["predicted_class"] not in ("struck_down", "upheld"):
+            result["predicted_class"] = "upheld"
+        # Coerce booleans
+        for bk in ("is_mandatory_sentence", "allows_judicial_discretion",
+                    "cites_fundamental_rights", "is_central_legislation",
+                    "has_criminal_provision"):
+            result[bk] = bool(result[bk])
+        return result
+    except Exception:
+        return dict(_LEGAL_FEATURE_SCHEMA)
+
+
 class UIFormatter:
     """Deterministic transformer that converts the raw pipeline result dict
     into a structured JSON payload designed for the Next.js frontend.
 
     This is NOT an LLM agent — it performs a purely mechanical mapping.
     """
+
+    _CLASSIFICATION_RE = re.compile(
+        r"\b(is\s+(this|the|section|article)|still\s+valid|struck\s+down|upheld|"
+        r"unconstitutional|current\s+status|status\s+of|valid\s+today|law\s+valid)\b",
+        re.IGNORECASE,
+    )
+    _ADVISORY_RE = re.compile(
+        r"\b(my\s+client|advise|advice|dispute|compensation|arbitration|"
+        r"what\s+should|how\s+(do|can|to)|i\s+need|property\s+case)\b",
+        re.IGNORECASE,
+    )
+
+    @staticmethod
+    def _detect_query_type(query: str) -> str:
+        if UIFormatter._CLASSIFICATION_RE.search(query):
+            return "classification"
+        if UIFormatter._ADVISORY_RE.search(query):
+            return "advisory"
+        return "advisory"
 
     @staticmethod
     def format(result: Dict[str, Any]) -> Dict[str, Any]:
@@ -457,6 +541,12 @@ class UIFormatter:
         # Academic papers from Springer (populated when want_research=True)
         springer_papers = result.get("research", {}).get("springer_papers", [])
 
+        # Classify query type and extract legal features via LLM
+        raw_query = result.get("query", "")
+        query_type = UIFormatter._detect_query_type(raw_query)
+
+        dice_features = extract_legal_features(raw_query)
+
         # Determine content type and text
         doc_type = doc.get("type", "simple_answer")
         if doc_type == "legal_draft":
@@ -475,6 +565,8 @@ class UIFormatter:
             "draft_type": doc.get("draft_type"),
             "draft_description": doc.get("draft_description"),
             "executive_summary": doc.get("executive_summary"),
+            "query_type": query_type,
+            "dice_features": dice_features,
             "validation": {
                 "is_grounded": val.get("is_grounded", False),
                 "risk_label": risk_label,

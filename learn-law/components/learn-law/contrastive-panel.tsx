@@ -23,16 +23,19 @@ interface DiceResult {
 }
 
 const FEATURE_DISPLAY: Record<string, string> = {
-  year_of_legislation: "Year of legislation",
-  year_of_judgment: "Year of judgment",
-  court_level: "Court level",
-  is_central_act: "Central Act",
-  has_fundamental_rights_article: "Fundamental Rights article",
+  is_mandatory_sentence: "Mandatory sentence",
+  allows_judicial_discretion: "Judicial discretion",
+  cites_fundamental_rights: "Fundamental Rights cited",
+  is_central_legislation: "Central legislation",
   has_criminal_provision: "Criminal provision",
+  applicable_act: "Applicable Act",
 }
 
 interface ContrastivePanelProps {
   data: ContrastiveData | null | undefined
+  queryType?: string
+  diceFeatures?: Record<string, unknown> | null
+  userQuery?: string
   className?: string
 }
 
@@ -104,9 +107,10 @@ function DiceTable({ result }: { result: DiceResult }) {
   )
 }
 
-export function ContrastivePanel({ data, className }: ContrastivePanelProps) {
+export function ContrastivePanel({ data, queryType = "advisory", diceFeatures, userQuery, className }: ContrastivePanelProps) {
   const [open, setOpen] = useState(false)
   const { onOpen, onClose } = useXaiTelemetry("dice_table")
+  const isClassification = queryType === "classification"
 
   // DiCE state
   const [diceResult, setDiceResult] = useState<DiceResult | null>(null)
@@ -132,22 +136,16 @@ export function ContrastivePanel({ data, className }: ContrastivePanelProps) {
     setOpen(next)
     if (next) {
       onOpen()
-      // Fetch DiCE counterfactuals on first open
-      if (!diceFetched.current) {
+      // Fetch DiCE counterfactuals on first open (classification queries only)
+      if (!diceFetched.current && isClassification) {
         diceFetched.current = true
         setDiceLoading(true)
         fetch("/api/xai/counterfactuals", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            case_features: {
-              year_of_legislation: 1860,
-              year_of_judgment: 2020,
-              court_level: "Supreme Court",
-              is_central_act: 1,
-              has_fundamental_rights_article: 1,
-              has_criminal_provision: 1,
-            },
+            user_query: userQuery ?? "",
+            case_features: diceFeatures ?? null,
           }),
         })
           .then((r) => (r.ok ? r.json() : null))
@@ -204,29 +202,39 @@ export function ContrastivePanel({ data, className }: ContrastivePanelProps) {
           })}
 
           {/* DiCE counterfactual table */}
-          <div>
-            <p className="text-[12px] font-semibold uppercase tracking-wider mb-1">
-              Counterfactual Scenarios (DiCE)
-            </p>
-            {diceLoading && (
-              <div className="space-y-1.5 animate-pulse">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="h-4 rounded bg-background/10" />
-                ))}
-              </div>
-            )}
-            {diceResult && <DiceTable result={diceResult} />}
-            {!diceLoading && !diceResult && hasLegacyCounterfactuals && (
-              <ul className="space-y-1.5">
-                {data.counterfactuals!.map((item, i) => (
-                  <li key={i} className="flex gap-2 text-xs text-background/60 leading-relaxed">
-                    <span className="mt-0.5 shrink-0 text-background/25">▸</span>
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+          {isClassification ? (
+            <div>
+              <p className="text-[12px] font-semibold uppercase tracking-wider mb-1">
+                Counterfactual Scenarios (DiCE)
+              </p>
+              {diceLoading && (
+                <div className="space-y-1.5 animate-pulse">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="h-4 rounded bg-background/10" />
+                  ))}
+                </div>
+              )}
+              {diceResult && <DiceTable result={diceResult} />}
+              {!diceLoading && !diceResult && hasLegacyCounterfactuals && (
+                <ul className="space-y-1.5">
+                  {data.counterfactuals!.map((item, i) => (
+                    <li key={i} className="flex gap-2 text-xs text-background/60 leading-relaxed">
+                      <span className="mt-0.5 shrink-0 text-background/25">▸</span>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : (
+            <div className="rounded border border-background/10 px-3 py-2">
+              <p className="text-[11px] text-background/50 leading-relaxed">
+                This is an advisory query — DiCE counterfactuals apply only to binary
+                validity questions. Click any sentence in the answer above to explore
+                source attribution via the Attention Map.
+              </p>
+            </div>
+          )}
 
           <XaiMicroFeedback featureName="dice_table" visible={open} />
         </div>

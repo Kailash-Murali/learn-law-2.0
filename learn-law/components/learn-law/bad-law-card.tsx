@@ -78,7 +78,7 @@ function ShapWaterfall({ data }: { data: ShapBreakdown }) {
   return (
     <div className="mt-2">
       <span className="text-[10px] uppercase tracking-wider text-background/40 font-medium">
-        SHAP Feature Attribution
+        Confidence Score Calculation
       </span>
       <ResponsiveContainer width="100%" height={chartData.length * 28 + 16}>
         <BarChart data={chartData} layout="vertical" margin={{ left: 4, right: 12, top: 4, bottom: 4 }}>

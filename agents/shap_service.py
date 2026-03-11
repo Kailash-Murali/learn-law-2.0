@@ -141,18 +141,30 @@ class ShapConfidenceService:
         predicted_class_idx = int(self._model.predict(x)[0])
         predicted_label = str(self._le.inverse_transform([predicted_class_idx])[0])
 
-        shap_values = self._explainer.shap_values(x)  # shape: (1, n_features) per class or (n_classes, 1, n_features)
+        shap_values = self._explainer.shap_values(x)
 
-        # shap_values may be list-of-arrays (one per class) or single array
+        n_classes = len(self._le.classes_)
         if isinstance(shap_values, list):
-            sv = np.array(shap_values[predicted_class_idx])[0]
-            base = float(self._explainer.expected_value[predicted_class_idx])
+            # SHAP < 0.41: list of (n_samples, n_features) per class
+            sv = np.asarray(shap_values[predicted_class_idx]).squeeze()
+            base = float(np.asarray(self._explainer.expected_value)[predicted_class_idx])
         else:
-            sv = np.array(shap_values)[0]
+            arr = np.asarray(shap_values)
+            if arr.ndim == 3:
+                # (n_classes, n_samples, n_features) or (n_samples, n_features, n_classes)
+                if arr.shape[0] == n_classes:
+                    sv = arr[predicted_class_idx, 0, :]
+                else:
+                    sv = arr[0, :, predicted_class_idx]
+            elif arr.ndim == 2:
+                sv = arr[0]
+            else:
+                sv = arr
+            sv = sv.flatten()  # guarantee 1-D
+            exp_val = self._explainer.expected_value
             base = float(
-                self._explainer.expected_value[predicted_class_idx]
-                if hasattr(self._explainer.expected_value, "__getitem__")
-                else self._explainer.expected_value
+                np.asarray(exp_val).flat[predicted_class_idx]
+                if hasattr(exp_val, "__len__") else exp_val
             )
 
         features_out = []

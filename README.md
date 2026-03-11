@@ -1,6 +1,6 @@
 # Constitutional Law Research Agent System
 
-A sophisticated multi-agent system for constitutional law research using Google's Gemini 2.5 Flash with custom tool calling, Indian Kanoon API integration, Springer Nature academic search, and SQLite database integration.
+A sophisticated multi-agent system for Indian constitutional law research using Groq LLM with custom tool calling, Indian Kanoon API integration, Springer Nature academic search, and four XAI (Explainable AI) pipelines. Served via a FastAPI backend and a Next.js frontend.
 
 ## Table of Contents
 
@@ -9,10 +9,9 @@ A sophisticated multi-agent system for constitutional law research using Google'
 - Installation
 - Usage
 - System Architecture
-- Database Schema
+- XAI Logic Routing
 - Configuration
-- Explainability & Tracing
-- API Integrations
+- API Endpoints
 - Troubleshooting
 - Legal Disclaimer
 - Contributing
@@ -22,42 +21,69 @@ A sophisticated multi-agent system for constitutional law research using Google'
 
 ## System Overview
 
-This system consists of four specialized agents working together to provide comprehensive constitutional law research:
+This system consists of six specialised agents and four XAI services working together:
 
 ### Agents
 
-| Agent                         | File                       | Purpose                                                                          |
-| ----------------------------- | -------------------------- | -------------------------------------------------------------------------------- |
-| **UI Agent**            | `ui_agent.py`            | Processes natural language user input and converts it to structured JSON queries |
-| **Main Agent**          | `main_agent.py`          | Orchestrates the overall workflow and coordinates between agents                 |
-| **Research Agent**      | `research_agent.py`      | Collects legal data from multiple sources (cases, statutes, articles)            |
-| **Documentation Agent** | `documentation_agent.py` | Generates professional, structured documentation suitable for legal use          |
+| Agent                    | File                              | Purpose                                                                  |
+| ------------------------ | --------------------------------- | ------------------------------------------------------------------------ |
+| **UI Agent**             | `agents/ui_agent.py`              | Parses natural language queries into structured JSON research parameters |
+| **Research Agent**       | `agents/research_agent.py`        | Collects legal data from Indian Kanoon, Springer Nature, and Groq LLM   |
+| **XAI Validation Agent** | `agents/xai_validation_agent.py` | Anti-hallucination: citation verification, bad-law detection, risk score |
+| **Documentation Agent**  | `agents/documentation_agent.py`  | Generates structured legal analysis, executive summaries, and reports    |
+| **Drafting Agent**       | `agents/drafting_agent.py`       | Produces legal drafts (petitions, opinions, notices, etc.)               |
+| **Springer Agent**       | `springer_agent.py`              | Springer Nature Meta + OpenAccess API integration for academic papers    |
+
+### XAI Services (local, no LLM calls)
+
+| Service                   | File                                  | Purpose                                                        |
+| ------------------------- | ------------------------------------- | -------------------------------------------------------------- |
+| **SHAP Confidence**       | `agents/shap_service.py`             | SHAP-based feature attribution for bad-law confidence scores   |
+| **DiCE Counterfactuals**  | `agents/dice_service.py`             | Diverse counterfactual explanations for classification queries |
+| **Attention Proxy**       | `agents/attention_proxy_service.py`  | TF-IDF cosine similarity for source-sentence attribution       |
+| **Surrogate Tree**        | `agents/surrogate_tree_service.py`   | Decision tree approximation of the validation logic            |
 
 ### Architecture
 
 ```
-User Query → UI Agent → Main Agent → Research Agent → Documentation Agent → Final Report
-              ↓           ↓            ↓                 ↓
-           SQLite DB   Status Mgmt   Legal APIs      Structured JSON
-                                    (Indian Kanoon,
-                                     Springer Nature)
+Next.js Frontend (learn-law/)
+        │
+        ▼  HTTP
+FastAPI Server (api_server.py)
+        │
+        ├─► ResearchAdapter (cli_adapter.py)
+        │         │
+        │         ▼
+        │   Coordinator (autogen_agent.py)
+        │     ├─► UIAgent ──► parse query
+        │     ├─► ResearchAgent ──► Groq LLM + Indian Kanoon + Springer
+        │     ├─► XAIValidationAgent ──► citation verification + bad-law detection
+        │     ├─► DocumentationAgent / DraftingAgent ──► final output
+        │     └─► UIFormatter ──► structured JSON payload (incl. query_type routing)
+        │
+        └─► XAI Endpoints (local scikit-learn services)
+              ├─► /api/xai/confidence-breakdown  (SHAP)
+              ├─► /api/xai/counterfactuals        (DiCE — classification queries only)
+              ├─► /api/xai/attention-map           (TF-IDF attention proxy)
+              └─► /api/xai/surrogate-tree          (Surrogate decision tree)
 ```
 
 ---
 
 ## Features
 
-- **Natural Language Processing**: Convert plain English queries into structured legal research parameters using Gemini AI
-- **Comprehensive Research**: Searches case law, statutes, pending cases, and scholarly articles
+- **Groq LLM Backend**: Fast inference via Groq API for all agent reasoning
+- **Comprehensive Research**: Case law, statutes, pending cases, and scholarly articles
 - **Real API Integrations**:
   - [Indian Kanoon](https://indiankanoon.org/) for Indian case law, statutes, and pending cases
   - [Springer Nature](https://dev.springernature.com/) for academic legal articles
-- **Professional Documentation**: Generates executive summaries, legal analysis, and recommendations
-- **Database Integration**: Persistent storage of all queries, research, and results
-- **Explainability & Traceability**: Structured logs, artefact snapshots, and decision metadata for every agent
-- **Deterministic Controls**: Pinned prompts, zero-temperature LLM settings, and normalized external queries ensure repeatable outcomes
-- **Retry Logic**: Robust error handling with exponential backoff
-- **Status Tracking**: Real-time status updates for long-running research tasks
+- **Four XAI Pipelines**: SHAP confidence breakdown, DiCE counterfactuals, attention-proxy source attribution, surrogate decision tree
+- **Query-Type Routing**: Classification queries trigger DiCE; advisory queries trigger attention map (see XAI Logic Routing)
+- **Anti-Hallucination Validation**: Indian Kanoon cross-verification, bad-law detection, hallucination risk scoring
+- **Professional Documentation**: Executive summaries, legal analysis, legal drafts, and PDF/DOCX export
+- **User Feedback Loop**: Thumbs up/down + grievance input logged to `feedback_log.jsonl` for continuous improvement
+- **Chain-of-Thought Traces**: Every agent logs reasoning steps viewable in the UI
+- **Deterministic Controls**: Pinned prompts, zero-temperature LLM settings, normalised external queries
 
 ---
 
@@ -65,421 +91,189 @@ User Query → UI Agent → Main Agent → Research Agent → Documentation Agen
 
 ### Prerequisites
 
-- Python 3.8+
-- Google Gemini API key
+- Python 3.10+
+- Node.js 18+ and pnpm
+- Groq API key
 - Indian Kanoon API token
 - Springer Nature API keys (Meta and OpenAccess)
 
-### Setup
+### Backend Setup
 
-1. **Clone or download the system files**
-2. **Create and activate a virtual environment** (recommended):
+```bash
+python -m venv .venv
+source .venv/bin/activate        # Linux/Mac
+pip install -r requirements.txt
+```
 
-   ```bash
-   python -m venv .venv
-   # Windows
-   .\.venv\Scripts\activate
-   # Linux/Mac
-   source .venv/bin/activate
-   ```
-3. **Install dependencies**:
+### Frontend Setup
 
-   ```bash
-   pip install -r requirements.txt
-   ```
-4. **Set up API keys**:
+```bash
+cd learn-law
+pnpm install
+```
 
-   **Option A: Environment Variables (Recommended)**
+### Environment Variables
 
-   ```bash
-   export GEMINI_API_KEY="your-gemini-api-key-here"
-   ```
-
-   **Option B: Edit `config.py`**
-
-   ```python
-   GEMINI_API_KEY = "your-actual-gemini-api-key-here"
-   IK_API_TOKEN = "your-indian-kanoon-token"
-   SPRINGER_META_API_KEY = "your-springer-meta-key"
-   SPRINGER_OPENACCESS_API_KEY = "your-springer-openaccess-key"
-   ```
-5. **Initialize the database**:
-   The database (`constitutional_law.db`) will be created automatically on first run.
+```bash
+export GROQ_API_KEY="your-groq-api-key"
+export IK_API_TOKEN="your-indian-kanoon-token"
+export SPRINGER_META_API_KEY="your-springer-meta-key"
+export SPRINGER_OPENACCESS_API_KEY="your-springer-openaccess-key"
+```
 
 ---
 
 ## Usage
 
-### Command Line Interface
-
-The main entry point is `main.py`.
-
-#### Interactive Mode
+### Start the Backend
 
 ```bash
-python main.py
+python -m uvicorn api_server:app --port 8000
 ```
 
-This starts an interactive session where you can:
-
-- Enter constitutional law research queries
-- Check status of ongoing research
-- View completed results
-- Explore processing traces and artefacts
-
-#### Single Query Mode
+### Start the Frontend
 
 ```bash
-python main.py "What are the current limits on executive power?"
+cd learn-law
+pnpm dev
 ```
 
-### CLI Commands
-
-| Command                    | Description                                            |
-| -------------------------- | ------------------------------------------------------ |
-| `help`, `h`            | Show available commands                                |
-| `status <request_id>`    | Check status of a research request                     |
-| `result <request_id>`    | Display full research results                          |
-| `trace <request_id>`     | Show detailed chronological trace of processing steps  |
-| `artefacts <request_id>` | List all intermediate data snapshots for a request     |
-| `artefact_content <id>`  | Show the full content of a specific artefact by its ID |
-| `clear`                  | Clear the screen                                       |
-| `quit`, `exit`, `q`  | Exit the program                                       |
+Then open [http://localhost:3000](http://localhost:3000).
 
 ### Example Queries
 
-- "What is the current status of affirmative action in education?"
-- "How has Article 21 been interpreted in recent Supreme Court cases?"
-- "What are the constitutional limits on presidential emergency powers?"
-- "How do state religious freedom laws interact with federal civil rights protections?"
+**Classification** (triggers DiCE counterfactuals):
+- "Is Section 66A of the IT Act still valid?"
+- "What is the current status of Section 124A IPC?"
 
-### Example Session
-
-```
-ConLaw> What are the fundamental rights under Article 21?
-
-Processing query: 'What are the fundamental rights under Article 21?'
-This may take a moment...
-
-✓ Research completed! Request ID: 15
-Status: completed
-
-Research Summary:
-  • Cases found: 10
-  • Statutes found: 5
-  • Articles found: 8
-  • Sources searched: 4
-
-Executive Summary:
-  Article 21 of the Indian Constitution guarantees the right to life and personal liberty...
-
-Use 'result 15' to see full documentation
-Use 'trace 15' to view the processing trace.
-
-ConLaw> trace 15
-
-==========================================================
-PROCESSING TRACE FOR REQUEST 15
-==========================================================
-
-[2025-01-15T10:30:45] AGENT: MainAgent | TYPE: EVENT
---------------------------------------------------------------------------------
-  Event Type: request_received
-  Phase: received
-  Payload: {"user_id": "cli_user", "query": "What are the fundamental rights under Article 21?"}
-...
-```
+**Advisory** (triggers attention-map source attribution):
+- "My client has a property dispute — what compensation rules apply?"
+- "How should I advise on arbitration under the 1996 Act?"
 
 ---
 
 ## System Architecture
 
-### Agent Communication Flow
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              User Input                                      │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  UIAgent (ui_agent.py)                                                       │
-│  • Receives natural language query                                           │
-│  • Uses Gemini to convert to structured JSON                                 │
-│  • Stores query in database                                                  │
-│  • Can generate clarifying questions for ambiguous queries                   │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  MainAgent (main_agent.py)                                                   │
-│  • Orchestrates workflow                                                     │
-│  • Updates status (pending → researching → documenting → completed)          │
-│  • Implements retry logic with exponential backoff                           │
-│  • Coordinates TraceLogger for explainability                                │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  ResearchAgent (research_agent.py)                                           │
-│  • Uses Gemini to generate tool plan (which APIs to query)                   │
-│  • Queries Indian Kanoon API for:                                            │
-│    - Case law (judgments)                                                    │
-│    - Statutes (acts)                                                         │
-│    - Pending cases                                                           │
-│  • Queries Springer Nature API for academic articles                         │
-│  • Normalizes and aggregates results                                         │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  DocumentationAgent (documentation_agent.py)                                 │
-│  • Processes research results                                                │
-│  • Uses Gemini to generate structured legal analysis                         │
-│  • Creates executive summary, case law review, statutory provisions          │
-│  • Provides recommendations and additional resources                         │
-│  • Has fallback documentation if AI generation fails                         │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           Final Documentation                                │
-│  • Structured JSON suitable for HTML rendering                               │
-│  • Stored in database for retrieval                                          │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
 ### Key Components
 
-| Component                 | File                | Description                                                               |
-| ------------------------- | ------------------- | ------------------------------------------------------------------------- |
-| `Config`                | config.py           | Centralized configuration for API keys, database path, and agent settings |
-| `ConstitutionalLawDB`   | database.py         | SQLite database handler with methods for all CRUD operations              |
-| `TraceLogger`           | trace_logger.py     | Records structured logs, artefacts, and decisions for explainability      |
-| `AsyncIKApi`            | `ik_api_async.py` | Async wrapper for Indian Kanoon API                                       |
-| `SpringerLegalResearch` | springer.py         | Springer Nature API integration for academic articles                     |
-| Custom Exceptions         | `exceptions.py`   | Hierarchy of custom exceptions for error handling                         |
+| Component           | File                    | Description                                                    |
+| ------------------- | ----------------------- | -------------------------------------------------------------- |
+| `FastAPI Server`    | `api_server.py`         | HTTP bridge between Next.js frontend and Python backend        |
+| `ResearchAdapter`   | `cli_adapter.py`        | Adapter pattern isolating AutoGen system for API/CLI use       |
+| `Coordinator`       | `autogen_agent.py`      | Orchestrates the multi-agent workflow end to end               |
+| `UIFormatter`       | `autogen_agent.py`      | Deterministic transformer: raw result → frontend JSON payload  |
+| `Config`            | `config.py`             | Centralised configuration for API keys and agent settings      |
+| Custom Exceptions   | `exceptions.py`         | Hierarchy of custom exceptions for error handling              |
 
 ---
 
-## Database Schema
+## XAI Logic Routing
 
-The SQLite database (`ConstitutionalLawDB`) contains the following tables:
+The system classifies every query as **classification** or **advisory** and routes to the appropriate XAI tool:
 
-### `user_requests`
+### Classification Queries
 
-| Column             | Type        | Description                                                   |
-| ------------------ | ----------- | ------------------------------------------------------------- |
-| `id`             | INTEGER     | Primary key                                                   |
-| `user_id`        | TEXT        | User identifier                                               |
-| `timestamp`      | DATETIME    | When request was submitted                                    |
-| `original_query` | TEXT        | Original user question                                        |
-| `query_summary`  | TEXT (JSON) | Structured research parameters                                |
-| `status`         | TEXT        | Current status (pending, researching, documenting, completed) |
+Pattern: *"Is this law still valid?"*, *"Was Section X struck down?"*, *"Current status of…"*
 
-### `research_results`
+- **DiCE counterfactuals** are generated with dynamically extracted features (year, court level, fundamental rights article, etc.)
+- The contrastive panel shows a table: *"If the year was 2015 instead of 1983 → Predicted Outcome: Upheld"*
 
-| Column                 | Type        | Description                  |
-| ---------------------- | ----------- | ---------------------------- |
-| `id`                 | INTEGER     | Primary key                  |
-| `request_id`         | INTEGER     | Foreign key to user_requests |
-| `sources`            | TEXT (JSON) | Research sources used        |
-| `case_laws`          | TEXT (JSON) | Relevant cases               |
-| `statutes`           | TEXT (JSON) | Constitutional provisions    |
-| `pending_cases`      | TEXT (JSON) | Ongoing cases                |
-| `articles`           | TEXT (JSON) | Scholarly articles           |
-| `research_timestamp` | DATETIME    | When research was completed  |
+### Advisory / Generative Queries
 
-### `documentation_output`
+Pattern: *"My client has a property dispute…"*, *"How should I advise on…"*
 
-| Column                 | Type        | Description                       |
-| ---------------------- | ----------- | --------------------------------- |
-| `id`                 | INTEGER     | Primary key                       |
-| `request_id`         | INTEGER     | Foreign key to user_requests      |
-| `output_json`        | TEXT (JSON) | Complete structured documentation |
-| `creation_timestamp` | DATETIME    | When documentation was generated  |
+- DiCE is **hidden** (no binary outcome to flip)
+- **Attention Map** is highlighted — click any sentence in the answer to see which source documents it was drawn from
+- **Source Validation** shows exactly where the LLM pulled compensation and arbitration rules from
 
-### `trace_logs`
+### Other XAI Features (always available)
 
-| Column         | Type        | Description                 |
-| -------------- | ----------- | --------------------------- |
-| `id`         | INTEGER     | Primary key                 |
-| `request_id` | INTEGER     | Foreign key (nullable)      |
-| `agent`      | TEXT        | Agent that logged the event |
-| `phase`      | TEXT        | Processing phase            |
-| `event_type` | TEXT        | Type of event               |
-| `payload`    | TEXT (JSON) | Event payload with hash     |
-| `created_at` | DATETIME    | Timestamp                   |
-
-### `artefact_snapshots`
-
-| Column            | Type        | Description                     |
-| ----------------- | ----------- | ------------------------------- |
-| `id`            | INTEGER     | Primary key                     |
-| `request_id`    | INTEGER     | Foreign key (nullable)          |
-| `agent`         | TEXT        | Agent that created the artefact |
-| `artefact_type` | TEXT        | Type of artefact                |
-| `content`       | TEXT (JSON) | Full artefact content with hash |
-| `created_at`    | DATETIME    | Timestamp                       |
-
-### `decision_metadata`
-
-| Column            | Type        | Description                  |
-| ----------------- | ----------- | ---------------------------- |
-| `id`            | INTEGER     | Primary key                  |
-| `request_id`    | INTEGER     | Foreign key (nullable)       |
-| `agent`         | TEXT        | Agent that made the decision |
-| `decision_type` | TEXT        | Type of decision             |
-| `rationale`     | TEXT        | Reasoning for the decision   |
-| `metadata`      | TEXT (JSON) | Decision metadata            |
-| `created_at`    | DATETIME    | Timestamp                    |
+- **SHAP Confidence Breakdown**: Shown in the bad-law cards — explains *why* a law was flagged as struck down
+- **Surrogate Decision Tree**: Shown in Chain-of-Thought panel — visualises the AI's grounding logic as a decision tree
+- **Chain-of-Thought Traces**: Every agent's reasoning steps are expandable in the CoT panel
 
 ---
 
 ## Configuration
 
-All configuration is centralized in `config.py`:
+All configuration is centralised in `config.py`:
 
 ```python
 class Config:
-    # Database
-    DATABASE_PATH = "constitutional_law.db"
-  
-    # Gemini API
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "your-key")
-    GEMINI_MODEL = "gemini-2.5-flash"
-  
-    # Indian Kanoon API
-    IK_API_TOKEN = "your-indian-kanoon-token"
-  
-    # Springer Nature APIs
-    SPRINGER_META_API_KEY = "your-meta-api-key"
-    SPRINGER_OPENACCESS_API_KEY = "your-openaccess-api-key"
-  
-    # Agent settings
-    AGENT_CONFIG = {
-        "max_retries": 3,
-        "retry_delay": 1.0,
-        "timeout": 30.0
-    }
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+    IK_API_TOKEN = os.getenv("IK_API_TOKEN", "")
+    SPRINGER_META_API_KEY = os.getenv("SPRINGER_META_API_KEY", "")
+    SPRINGER_OPENACCESS_API_KEY = os.getenv("SPRINGER_OPENACCESS_API_KEY", "")
 ```
 
 ---
 
-## Explainability & Tracing
+## API Endpoints
 
-Every agent interaction leaves an audit trail via `TraceLogger`:
+### Core
 
-### Trace Types
+| Method | Path              | Description                     |
+| ------ | ----------------- | ------------------------------- |
+| GET    | `/api/health`     | System health + missing keys    |
+| POST   | `/api/research`   | Full research pipeline          |
+| POST   | `/api/parse`      | Parse query without research    |
+| GET    | `/api/download`   | Download generated PDF/DOCX     |
+| POST   | `/api/feedback`   | Submit user feedback            |
 
-1. **Structured Logs** (`trace_logs` table)
+### XAI
 
-   - Captures who did what, when, and why
-   - Includes hashed payloads for integrity verification
-2. **Artefact Snapshots** (`artefact_snapshots` table)
-
-   - Preserves raw Gemini responses
-   - Stores cleaned, structured objects
-   - Enables replay and debugging
-3. **Decision Metadata** (`decision_metadata` table)
-
-   - Records agent reasoning
-   - Documents query structuring decisions
-   - Explains tool plan choices
-
-### Viewing Traces
-
-```bash
-# In CLI
-ConLaw> trace 15
-ConLaw> artefacts 15
-ConLaw> artefact_content 42
-```
-
-### Direct Database Query
-
-```powershell
-python -c "import sqlite3, json; conn = sqlite3.connect('constitutional_law.db'); conn.row_factory = sqlite3.Row; cur = conn.cursor();
-for table in ('trace_logs','artefact_snapshots','decision_metadata'):
-   cur.execute('SELECT * FROM ' + table + ' WHERE request_id=? ORDER BY id', (15,));
-   rows = [dict(row) for row in cur.fetchall()];
-   print(f'== {table} ==');
-   for row in rows: print(json.dumps(row, indent=2, default=str));
-conn.close()"
-```
-
----
-
-## API Integrations
-
-### Indian Kanoon API
-
-Integration via `AsyncIKApi` and `ik_api_async.py`:
-
-- **Case Law**: Search judgments by keywords, case names, legal provisions
-- **Statutes**: Search acts and statutory provisions
-- **Pending Cases**: Find ongoing litigation
-
-Query operators supported:
-
-- `ANDD` - Logical AND
-- `ORR` - Logical OR
-- `NOTT` - Logical NOT
-- Quoted phrases for exact matches
-
-### Springer Nature API
-
-Integration via `SpringerLegalResearch`:
-
-- **Meta API**: Broader metadata search across Springer publications
-- **OpenAccess API**: Full-text search for open access content
-
-Configured for Basic plan compatibility with optimized query transformation.
-
-### Query Normalization
-
-The `ResearchAgent` normalizes queries using `extract_query_string` to ensure consistent API calls:
-
-```python
-def extract_query_string(tool_plan_value: str) -> str:
-    # Extracts clean query string from tool plan
-    # Removes formInput prefixes, doctypes, and metadata
-```
+| Method | Path                             | Description                          |
+| ------ | -------------------------------- | ------------------------------------ |
+| POST   | `/api/xai/confidence-breakdown`  | SHAP feature attribution             |
+| POST   | `/api/xai/counterfactuals`       | DiCE diverse counterfactuals         |
+| POST   | `/api/xai/attention-map`         | TF-IDF sentence-source attribution   |
+| POST   | `/api/xai/surrogate-tree`        | Surrogate decision tree path         |
 
 ---
 
 ## Troubleshooting
 
-### Common Issues
+| Issue                                  | Solution                                                               |
+| -------------------------------------- | ---------------------------------------------------------------------- |
+| "API key not found"                    | Ensure `GROQ_API_KEY` is set in environment or `config.py`            |
+| 422 on `/api/xai/surrogate-tree`      | The endpoint now accepts both `validation_features` and `validation_data` |
+| SHAP "size-1 array" error              | Fixed — the SHAP extraction now handles 3-D ndarray from SHAP ≥ 0.41  |
+| "Could not load decision tree"         | Backend response is now transformed to the frontend-expected shape     |
+| DiCE fires with hardcoded features     | Fixed — features are now dynamically derived from the query context    |
+| Indian Kanoon rate limit               | Reduce request frequency; add delays between searches                  |
+| Springer empty results                 | Use simpler queries (2-3 keywords); check API plan constraints         |
 
-| Issue                      | Solution                                                             |
-| -------------------------- | -------------------------------------------------------------------- |
-| "API key not found"        | Ensure `GEMINI_API_KEY` is set in environment or config.py         |
-| "Database locked"          | Close other processes accessing the database; check file permissions |
-| "Research timeout"         | Increase timeout values in config.py; check internet connection      |
-| "JSON parsing error"       | Usually resolves with retry logic; check Gemini API status           |
-| "Indian Kanoon rate limit" | Reduce `maxpages` parameter; add delays between requests           |
-| "Springer empty results"   | Use simpler queries (2-3 keywords); check Basic plan constraints     |
+---
 
-### Logs
+## Project Structure
 
-The system uses Python's `logging` module. Check console output for detailed error messages:
-
-```python
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 ```
-
-### Testing API Connections
-
-```bash
-# Test Indian Kanoon
-python test.py
-
-# Test Springer Nature
-python springer.py
+learn-law-2.0/
+├── api_server.py               # FastAPI HTTP server (primary entry point)
+├── cli_adapter.py              # Adapter pattern around AutoGen system
+├── autogen_agent.py            # Multi-agent orchestrator + UIFormatter
+├── springer_agent.py           # Springer Nature API agent
+├── config.py                   # Centralised configuration
+├── exceptions.py               # Custom exception hierarchy
+├── requirements.txt            # Python dependencies
+├── feedback_log.jsonl          # User feedback log
+├── agents/
+│   ├── base_agent.py           # Base agent class (Groq LLM wrapper)
+│   ├── ui_agent.py             # Query parsing agent
+│   ├── research_agent.py       # Legal research agent
+│   ├── xai_validation_agent.py # Anti-hallucination validation
+│   ├── documentation_agent.py  # Documentation generation
+│   ├── drafting_agent.py       # Legal draft generation
+│   ├── shap_service.py         # SHAP confidence breakdown
+│   ├── dice_service.py         # DiCE counterfactual service
+│   ├── attention_proxy_service.py # TF-IDF attention proxy
+│   └── surrogate_tree_service.py  # Surrogate decision tree
+└── learn-law/                  # Next.js frontend
+    ├── app/
+    │   ├── page.tsx            # Main chat interface
+    │   └── api/                # Next.js API routes (proxy to FastAPI)
+    └── components/
+        └── learn-law/          # UI components (panels, highlighter, etc.)
 ```
 
 ---
@@ -499,10 +293,10 @@ This system is for **research and educational purposes only**.
 
 To extend this system:
 
-1. **Add new data sources**: Implement new API methods in `research_agent.py`
-2. **Enhance documentation formats**: Modify prompts in `documentation_agent.py`
-3. **Improve query processing**: Update Gemini prompts in `ui_agent.py`
-4. **Add new agent types**: Follow the existing pattern with proper tracing
+1. **Add new data sources**: Implement new API methods in `agents/research_agent.py`
+2. **Enhance documentation formats**: Modify prompts in `agents/documentation_agent.py`
+3. **Add new XAI services**: Follow the pattern in `agents/shap_service.py` — local sklearn, no LLM
+4. **Improve query processing**: Update Groq prompts in `agents/ui_agent.py`
 
 ### Code Style
 
@@ -510,29 +304,6 @@ To extend this system:
 - Document all public methods with docstrings
 - Add trace logging for new agent interactions
 - Handle exceptions using the custom exception hierarchy in `exceptions.py`
-
----
-
-## Project Structure
-
-```
-legal-research/
-├── main.py                 # CLI entry point
-├── main_agent.py           # Main orchestration agent
-├── ui_agent.py             # User input processing agent
-├── research_agent.py       # Research coordination agent
-├── documentation_agent.py  # Documentation generation agent
-├── database.py             # SQLite database handler
-├── trace_logger.py         # Explainability tracing
-├── config.py               # Configuration settings
-├── exceptions.py           # Custom exception hierarchy
-├── ik_api_async.py         # Indian Kanoon API wrapper
-├── springer.py             # Springer Nature API integration
-├── requirements.txt        # Python dependencies
-├── test.py                 # API testing script
-├── constitutional_law.db   # SQLite database (created on first run)
-└── learn-law/              # Next.js frontend (separate project)
-```
 
 ---
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useMemo } from "react"
 import { cn } from "@/lib/utils"
 import {
   Sheet,
@@ -46,17 +46,24 @@ export function SentenceHighlighter({ text, citations, className }: SentenceHigh
   const [activeSentence, setActiveSentence] = useState<string | null>(null)
   const [sentenceMap, setSentenceMap] = useState<SentenceMap[] | null>(null)
   const [loading, setLoading] = useState(false)
+  const [noCitations, setNoCitations] = useState(false)
+  const [fetchError, setFetchError] = useState<string | null>(null)
   const { onOpen, onClose } = useXaiTelemetry("attention_map")
 
-  const sentences = splitSentences(text)
+  const sentences = useMemo(() => splitSentences(text), [text])
 
   const handleClick = useCallback(
     (sentence: string) => {
       setActiveSentence(sentence)
       setDrawerOpen(true)
+      setFetchError(null)
       onOpen()
 
-      if (!citations || citations.length === 0) return
+      if (!citations || citations.length === 0) {
+        setNoCitations(true)
+        return
+      }
+      setNoCitations(false)
 
       setLoading(true)
       fetch("/api/xai/attention-map", {
@@ -69,11 +76,16 @@ export function SentenceHighlighter({ text, citations, className }: SentenceHigh
             .map((c) => ({ name: c.name, url: c.url ?? "", text: c.name })),
         }),
       })
-        .then((r) => (r.ok ? r.json() : null))
+        .then((r) => {
+          if (!r.ok) throw new Error(`Server error (${r.status})`)
+          return r.json()
+        })
         .then((data) => {
           if (data?.sentence_source_map) setSentenceMap(data.sentence_source_map)
         })
-        .catch(() => {})
+        .catch((err) => {
+          setFetchError(err instanceof Error ? err.message : "Failed to load attribution data")
+        })
         .finally(() => setLoading(false))
     },
     [citations, sentences, onOpen],
@@ -129,6 +141,18 @@ export function SentenceHighlighter({ text, citations, className }: SentenceHigh
                   <div key={i} className="h-12 rounded bg-background/10" />
                 ))}
               </div>
+            )}
+
+            {noCitations && (
+              <p className="text-xs text-background/40">
+                No citations available for this response — source attribution requires at least one cited document.
+              </p>
+            )}
+
+            {fetchError && (
+              <p className="text-xs text-red-400">
+                {fetchError}
+              </p>
             )}
 
             {activeData && activeData.sources.map((src, i) => (

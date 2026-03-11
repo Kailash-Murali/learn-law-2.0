@@ -1,148 +1,172 @@
-"""Surrogate Decision Tree service for the XAI validation logic.
+"""Surrogate Decision Tree service using LLM-extracted legal features.
 
-Trains a shallow DecisionTreeClassifier that approximates the
-XAIValidationAgent's ``is_grounded`` prediction, then serialises
-the decision path as a JSON graph for frontend rendering.
-
-Never calls Groq — all computation is local.
+Builds a per-request decision tree by:
+1. Taking boolean legal features from extract_legal_features()
+2. Generating synthetic perturbations (flip booleans)
+3. Labelling via Groq oracle
+4. Training a shallow DecisionTreeClassifier
+5. Serialising the full tree structure for frontend rendering
 """
 
+import json
 import logging
 from typing import Any, Dict, List
 
 import numpy as np
+import pandas as pd
 from sklearn.tree import DecisionTreeClassifier
+from groq import Groq
+
+from config import Config
 
 _logger = logging.getLogger(__name__)
 
-# ── Feature schema ────────────────────────────────────────────────────
+# ── Feature schema (boolean features from extract_legal_features) ─────
 FEATURE_NAMES: List[str] = [
-    "citation_count",
-    "verified_citation_ratio",
-    "bad_law_count",
-    "article_ref_count",
-    "statute_count",
-    "ik_available",
-    "springer_paper_count",
+    "is_mandatory_sentence",
+    "allows_judicial_discretion",
+    "cites_fundamental_rights",
+    "is_central_legislation",
+    "has_criminal_provision",
 ]
 
 FEATURE_DISPLAY: Dict[str, str] = {
-    "citation_count": "Total citations",
-    "verified_citation_ratio": "Verified citation ratio",
-    "bad_law_count": "Repealed/bad laws found",
-    "article_ref_count": "Constitutional article refs",
-    "statute_count": "Statute citations",
-    "ik_available": "IK API available",
-    "springer_paper_count": "Springer papers",
+    "is_mandatory_sentence": "Mandatory sentence",
+    "allows_judicial_discretion": "Judicial discretion",
+    "cites_fundamental_rights": "Fundamental Rights cited",
+    "is_central_legislation": "Central legislation",
+    "has_criminal_provision": "Criminal provision",
 }
 
-# ── Seed training data ───────────────────────────────────────────────
-# [citation_count, verified_ratio, bad_law_count, article_refs, statutes, ik_avail, springer]
-_SEED_X = np.array([
-    # Grounded (is_grounded = True)
-    [4, 1.0, 0, 3, 2, 1, 2],
-    [3, 0.67, 0, 2, 1, 1, 1],
-    [2, 1.0, 1, 1, 1, 1, 0],
-    [5, 0.8, 0, 4, 3, 1, 3],
-    [1, 1.0, 0, 2, 1, 1, 0],
-    [3, 1.0, 0, 1, 2, 1, 1],
-    [2, 0.5, 0, 3, 2, 1, 2],
-    [4, 0.75, 1, 2, 2, 1, 1],
-    [0, 0.0, 0, 2, 1, 0, 0],  # no citations but articles + statutes
-    [1, 1.0, 0, 1, 0, 1, 1],
-    # Not grounded (is_grounded = False)
-    [0, 0.0, 0, 0, 0, 1, 0],
-    [2, 0.0, 2, 0, 0, 1, 0],
-    [1, 0.0, 1, 0, 0, 1, 0],
-    [0, 0.0, 0, 0, 0, 0, 0],
-    [3, 0.0, 3, 0, 0, 1, 0],
-    [0, 0.0, 1, 0, 0, 0, 0],
-    [1, 0.0, 0, 0, 0, 1, 0],  # one citation but unverified
-    [0, 0.0, 0, 1, 0, 0, 0],  # minimal article ref, no IK
-], dtype=float)
 
-_SEED_Y = np.array([
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    0, 0, 0, 0, 0, 0, 0, 0,
-])
+def _generate_perturbations(base: Dict[str, Any], n: int = 150) -> pd.DataFrame:
+    """Generate n synthetic rows by randomly flipping boolean features."""
+    rng = np.random.default_rng(seed=42)
+    base_row = np.array([int(bool(base.get(f, 0))) for f in FEATURE_NAMES], dtype=int)
+    rows = np.tile(base_row, (n, 1))
+    flip_mask = rng.random((n, len(FEATURE_NAMES))) < 0.4
+    rows = np.where(flip_mask, 1 - rows, rows)
+    # Ensure the original row is included as the first row
+    rows[0] = base_row
+    return pd.DataFrame(rows, columns=FEATURE_NAMES)
+
+
+def _label_with_groq(X_df: pd.DataFrame) -> np.ndarray:
+    """Batch-label all perturbation rows via a single Groq prompt."""
+    try:
+        # Build compact CSV table
+        header = ",".join(FEATURE_NAMES)
+        csv_rows = "\n".join(
+            ",".join(str(int(row[f])) for f in FEATURE_NAMES)
+            for _, row in X_df.iterrows()
+        )
+        csv_table = f"{header}\n{csv_rows}"
+
+        client = Groq(api_key=Config.GROQ_API_KEY)
+        resp = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            temperature=0,
+            max_tokens=2000,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a legal classifier for Indian constitutional law. "
+                        "For each row of boolean legal features below, predict whether "
+                        "the law would be 'struck_down' or 'upheld'. "
+                        "Reply ONLY with a JSON array of strings, one per row, in order. "
+                        "No markdown, no explanation."
+                    ),
+                },
+                {"role": "user", "content": csv_table},
+            ],
+        )
+        raw = resp.choices[0].message.content.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        labels = json.loads(raw)
+        y = np.array([0 if str(l).lower() == "struck_down" else 1 for l in labels])
+        if len(y) != len(X_df):
+            raise ValueError(f"Label count {len(y)} != row count {len(X_df)}")
+        return y
+    except Exception as e:
+        _logger.warning("Groq oracle labelling failed, using heuristic: %s", e)
+        # Heuristic fallback: mandatory sentences more likely struck down
+        return (1 - X_df["is_mandatory_sentence"].values).astype(int)
 
 
 class SurrogateTreeService:
-    """Singleton service for surrogate decision tree explanations."""
+    """Service for surrogate decision tree explanations using legal features."""
 
     def __init__(self) -> None:
-        self._tree = DecisionTreeClassifier(max_depth=4, random_state=42)
-        self._tree.fit(_SEED_X, _SEED_Y)
-        _logger.info("SurrogateTreeService initialised (depth=%d)", self._tree.get_depth())
+        _logger.info("SurrogateTreeService initialised (per-request training)")
 
-    def explain(self, validation_features: Dict[str, float]) -> Dict[str, Any]:
-        """Return the decision path as a node/edge graph."""
-        x = np.array([[validation_features.get(f, 0.0) for f in FEATURE_NAMES]])
+    def build_from_query(self, legal_features: Dict[str, Any]) -> Dict[str, Any]:
+        """Build and serialise a surrogate tree from LLM-extracted legal features."""
+        # Step A: Generate perturbations
+        X_df = _generate_perturbations(legal_features, n=150)
+        X = X_df.values
 
-        prediction = bool(self._tree.predict(x)[0])
-        proba = self._tree.predict_proba(x)[0]
-        confidence = float(proba[1] if prediction else proba[0])
+        # Step B: Label via Groq oracle
+        y = _label_with_groq(X_df)
 
-        # Extract decision path
-        path_indicator = self._tree.decision_path(x)
-        node_indices = path_indicator.indices.tolist()
+        # Step C: Train tree
+        clf = DecisionTreeClassifier(max_depth=3, min_samples_leaf=5, random_state=42)
+        clf.fit(X, y)
 
-        tree_ = self._tree.tree_
+        # Training accuracy
+        accuracy = float(clf.score(X, y))
+
+        # Predict for the original input (first row)
+        original_pred = bool(clf.predict(X[:1])[0])
+
+        # Step D: Serialise FULL tree structure
+        tree_ = clf.tree_
         nodes = []
-        edges = []
+        n_nodes = tree_.node_count
 
-        for idx, node_id in enumerate(node_indices):
+        for node_id in range(n_nodes):
             feature_idx = tree_.feature[node_id]
             threshold = tree_.threshold[node_id]
-            is_leaf = feature_idx < 0  # -2 means leaf
+            is_leaf = feature_idx < 0  # TREE_UNDEFINED = -2
+
+            left_child = int(tree_.children_left[node_id])
+            right_child = int(tree_.children_right[node_id])
 
             if is_leaf:
-                # Leaf: determine class
                 class_counts = tree_.value[node_id][0]
                 predicted_class = int(np.argmax(class_counts))
-                node_info = {
+                nodes.append({
                     "id": node_id,
+                    "is_leaf": True,
+                    "value": "Upheld" if predicted_class == 1 else "Struck Down",
                     "feature": "",
                     "threshold": 0.0,
-                    "direction": "",
-                    "is_leaf": True,
-                    "value": "Grounded" if predicted_class == 1 else "Not Grounded",
-                }
+                    "gini": round(float(tree_.impurity[node_id]), 3),
+                    "samples": int(tree_.n_node_samples[node_id]),
+                    "children_left": -1,
+                    "children_right": -1,
+                })
             else:
                 fname = FEATURE_NAMES[feature_idx] if feature_idx < len(FEATURE_NAMES) else f"feature_{feature_idx}"
                 display_name = FEATURE_DISPLAY.get(fname, fname)
-
-                # Determine direction: did we go left (<=) or right (>)?
-                if idx + 1 < len(node_indices):
-                    next_node = node_indices[idx + 1]
-                    left_child = tree_.children_left[node_id]
-                    direction = "left" if next_node == left_child else "right"
-                else:
-                    direction = ""
-
-                node_info = {
+                nodes.append({
                     "id": node_id,
-                    "feature": display_name,
-                    "threshold": round(float(threshold), 2),
-                    "direction": direction,
                     "is_leaf": False,
                     "value": "",
-                }
-
-            nodes.append(node_info)
-
-            # Edge to next node
-            if idx + 1 < len(node_indices):
-                edges.append({
-                    "from": node_id,
-                    "to": node_indices[idx + 1],
+                    "feature": display_name,
+                    "threshold": round(float(threshold), 2),
+                    "gini": round(float(tree_.impurity[node_id]), 3),
+                    "samples": int(tree_.n_node_samples[node_id]),
+                    "children_left": left_child,
+                    "children_right": right_child,
                 })
 
         return {
             "nodes": nodes,
-            "edges": edges,
-            "prediction": prediction,
-            "confidence": round(confidence, 4),
+            "accuracy": round(accuracy, 4),
+            "prediction": original_pred,
+            "feature_names": list(FEATURE_NAMES),
         }
 
 

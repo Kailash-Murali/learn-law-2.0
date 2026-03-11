@@ -22,7 +22,9 @@ export interface Message {
   docxPath?: string | null
   uiPayload?: Record<string, any> | null
   contrastive?: Record<string, any> | null
-  agentTraces?: Record<string, any> | null
+  queryType?: string | null
+  diceFeatures?: Record<string, unknown> | null
+  userQuery?: string | null
 }
 
 export interface ChatSession {
@@ -365,7 +367,9 @@ export default function Page() {
           docxPath: data.docx_path ?? null,
           uiPayload,
           contrastive,
-          agentTraces: data.agent_traces ?? null,
+          queryType: uiPayload?.query_type ?? null,
+          diceFeatures: uiPayload?.dice_features ?? null,
+          userQuery: queryText,
         }
         const finalMessages = [...priorMessages, assistantMsg]
         setMessages(finalMessages)
@@ -613,7 +617,20 @@ export default function Page() {
                       <>
                         {msg.mode === "[draft]" && <DraftActions text={msg.text} docxPath={msg.docxPath} />}
                         {msg.mode === "[research]" && <ReportActions text={msg.text} pdfPath={msg.pdfPath} />}
-                        {msg.mode === "[contrastive]" && <ContrastivePanel data={msg.contrastive} />}
+                        {(msg.mode === "[contrastive]" || msg.uiPayload?.query_type === "classification") && (
+                          <ContrastivePanel
+                            data={msg.contrastive}
+                            queryType={msg.queryType ?? "advisory"}
+                            diceFeatures={msg.diceFeatures}
+                            userQuery={msg.userQuery ?? undefined}
+                          />
+                        )}
+                        {msg.uiPayload?.validation && (
+                          <CotPanel
+                            validation={msg.uiPayload.validation as Record<string, unknown>}
+                            userQuery={msg.userQuery ?? undefined}
+                          />
+                        )}
                         {msg.uiPayload?.validation && (
                           <ValidationPanel
                             validation={msg.uiPayload.validation as ValidationData}
@@ -621,12 +638,6 @@ export default function Page() {
                         )}
                         {Array.isArray(msg.uiPayload?.springer_papers) && msg.uiPayload.springer_papers.length > 0 && (
                           <SpringerPapersPanel papers={msg.uiPayload.springer_papers} />
-                        )}
-                        {msg.agentTraces && Object.keys(msg.agentTraces).length > 0 && (
-                          <CotPanel
-                            traces={msg.agentTraces}
-                            validation={msg.uiPayload?.validation as Record<string, unknown> | undefined}
-                          />
                         )}
                       </>
                     )}

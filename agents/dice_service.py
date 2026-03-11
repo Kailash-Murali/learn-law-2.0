@@ -14,78 +14,76 @@ import dice_ml
 
 _logger = logging.getLogger(__name__)
 
-# ── Feature schema ────────────────────────────────────────────────────
-CONTINUOUS_FEATURES = ["year_of_legislation", "year_of_judgment"]
-CATEGORICAL_FEATURES = [
-    "court_level",
-    "is_central_act",
-    "has_fundamental_rights_article",
+# ── Feature schema (matches extract_legal_features output) ────────────
+BOOLEAN_FEATURES = [
+    "is_mandatory_sentence",
+    "allows_judicial_discretion",
+    "cites_fundamental_rights",
+    "is_central_legislation",
     "has_criminal_provision",
 ]
+CATEGORICAL_FEATURES = ["applicable_act"]
+CONTINUOUS_FEATURES: List[str] = []
 OUTCOME_COL = "law_status"
 
 FEATURE_DISPLAY: Dict[str, str] = {
-    "year_of_legislation": "Year of legislation",
-    "year_of_judgment": "Year of judgment",
-    "court_level": "Court level",
-    "is_central_act": "Central Act",
-    "has_fundamental_rights_article": "Fundamental Rights article",
+    "is_mandatory_sentence": "Mandatory sentence",
+    "allows_judicial_discretion": "Judicial discretion",
+    "cites_fundamental_rights": "Fundamental Rights cited",
+    "is_central_legislation": "Central legislation",
     "has_criminal_provision": "Criminal provision",
+    "applicable_act": "Applicable Act",
 }
 
-# ── Seed dataset (landmark Indian cases) ──────────────────────────────
+# ── Seed dataset (landmark Indian cases — binary outcomes only) ───────
 _SEED_DATA = [
     # Struck down
-    {"year_of_legislation": 2000, "year_of_judgment": 2015, "court_level": "Supreme Court",
-     "is_central_act": 1, "has_fundamental_rights_article": 1, "has_criminal_provision": 1,
-     "law_status": "struck_down"},  # S.66A IT Act
-    {"year_of_legislation": 1860, "year_of_judgment": 1983, "court_level": "Supreme Court",
-     "is_central_act": 1, "has_fundamental_rights_article": 1, "has_criminal_provision": 1,
+    {"is_mandatory_sentence": 1, "allows_judicial_discretion": 0, "cites_fundamental_rights": 1,
+     "is_central_legislation": 1, "has_criminal_provision": 1, "applicable_act": "IT Act",
+     "law_status": "struck_down"},  # S.66A IT Act — Shreya Singhal
+    {"is_mandatory_sentence": 1, "allows_judicial_discretion": 0, "cites_fundamental_rights": 1,
+     "is_central_legislation": 1, "has_criminal_provision": 1, "applicable_act": "IPC",
      "law_status": "struck_down"},  # S.303 IPC — Mithu v State of Punjab
-    {"year_of_legislation": 1860, "year_of_judgment": 2018, "court_level": "Supreme Court",
-     "is_central_act": 1, "has_fundamental_rights_article": 1, "has_criminal_provision": 1,
+    {"is_mandatory_sentence": 0, "allows_judicial_discretion": 0, "cites_fundamental_rights": 1,
+     "is_central_legislation": 1, "has_criminal_provision": 1, "applicable_act": "IPC",
      "law_status": "struck_down"},  # S.497 IPC — Joseph Shine
-    {"year_of_legislation": 1860, "year_of_judgment": 2018, "court_level": "Supreme Court",
-     "is_central_act": 1, "has_fundamental_rights_article": 1, "has_criminal_provision": 1,
-     "law_status": "struck_down"},  # S.377 IPC (partial) — Navtej Singh Johar
-    {"year_of_legislation": 1985, "year_of_judgment": 2005, "court_level": "Supreme Court",
-     "is_central_act": 1, "has_fundamental_rights_article": 1, "has_criminal_provision": 0,
+    {"is_mandatory_sentence": 0, "allows_judicial_discretion": 0, "cites_fundamental_rights": 1,
+     "is_central_legislation": 1, "has_criminal_provision": 1, "applicable_act": "IPC",
+     "law_status": "struck_down"},  # S.377 IPC — Navtej Singh Johar
+    {"is_mandatory_sentence": 0, "allows_judicial_discretion": 0, "cites_fundamental_rights": 1,
+     "is_central_legislation": 1, "has_criminal_provision": 0, "applicable_act": "IMDT Act",
      "law_status": "struck_down"},  # IMDT Act — Sarbananda Sonowal
-    # Stayed / under review
-    {"year_of_legislation": 1860, "year_of_judgment": 2022, "court_level": "Supreme Court",
-     "is_central_act": 1, "has_fundamental_rights_article": 1, "has_criminal_provision": 1,
-     "law_status": "stayed"},  # S.124A IPC — Sedition
-    {"year_of_legislation": 2019, "year_of_judgment": 2020, "court_level": "Supreme Court",
-     "is_central_act": 1, "has_fundamental_rights_article": 1, "has_criminal_provision": 0,
-     "law_status": "under_review"},  # CAA challenges
-    {"year_of_legislation": 2019, "year_of_judgment": 2023, "court_level": "Supreme Court",
-     "is_central_act": 1, "has_fundamental_rights_article": 1, "has_criminal_provision": 0,
-     "law_status": "under_review"},  # Article 370 abrogation
-    # Valid
-    {"year_of_legislation": 1950, "year_of_judgment": 1978, "court_level": "Supreme Court",
-     "is_central_act": 1, "has_fundamental_rights_article": 1, "has_criminal_provision": 0,
-     "law_status": "valid"},  # Maneka Gandhi
-    {"year_of_legislation": 1950, "year_of_judgment": 1973, "court_level": "Supreme Court",
-     "is_central_act": 1, "has_fundamental_rights_article": 1, "has_criminal_provision": 0,
-     "law_status": "valid"},  # Kesavananda Bharati
-    {"year_of_legislation": 2016, "year_of_judgment": 2017, "court_level": "Supreme Court",
-     "is_central_act": 1, "has_fundamental_rights_article": 0, "has_criminal_provision": 0,
-     "law_status": "valid"},  # Aadhaar Act — partial validity
-    {"year_of_legislation": 2013, "year_of_judgment": 2014, "court_level": "Supreme Court",
-     "is_central_act": 1, "has_fundamental_rights_article": 0, "has_criminal_provision": 0,
-     "law_status": "valid"},  # Companies Act 2013
-    {"year_of_legislation": 1955, "year_of_judgment": 1965, "court_level": "High Court",
-     "is_central_act": 1, "has_fundamental_rights_article": 0, "has_criminal_provision": 0,
-     "law_status": "valid"},  # Hindu Marriage Act
-    {"year_of_legislation": 1986, "year_of_judgment": 2019, "court_level": "Supreme Court",
-     "is_central_act": 1, "has_fundamental_rights_article": 0, "has_criminal_provision": 0,
-     "law_status": "valid"},  # Consumer Protection Act
-    {"year_of_legislation": 1970, "year_of_judgment": 1980, "court_level": "High Court",
-     "is_central_act": 0, "has_fundamental_rights_article": 0, "has_criminal_provision": 0,
-     "law_status": "valid"},  # State rent-control act
-    {"year_of_legislation": 1990, "year_of_judgment": 2000, "court_level": "Tribunal",
-     "is_central_act": 0, "has_fundamental_rights_article": 0, "has_criminal_provision": 0,
-     "law_status": "valid"},  # Service tribunal matter
+    {"is_mandatory_sentence": 0, "allows_judicial_discretion": 0, "cites_fundamental_rights": 1,
+     "is_central_legislation": 1, "has_criminal_provision": 0, "applicable_act": "Constitution",
+     "law_status": "struck_down"},  # NJAC — Fourth Judges Case
+    {"is_mandatory_sentence": 1, "allows_judicial_discretion": 0, "cites_fundamental_rights": 1,
+     "is_central_legislation": 1, "has_criminal_provision": 1, "applicable_act": "IPC",
+     "law_status": "struck_down"},  # S.309 IPC attempt (Mental Healthcare Act 2017)
+    # Upheld (binary mapping: valid / stayed / under_review → upheld)
+    {"is_mandatory_sentence": 0, "allows_judicial_discretion": 1, "cites_fundamental_rights": 1,
+     "is_central_legislation": 1, "has_criminal_provision": 0, "applicable_act": "Constitution",
+     "law_status": "upheld"},  # Maneka Gandhi — Art 21 expansion
+    {"is_mandatory_sentence": 0, "allows_judicial_discretion": 1, "cites_fundamental_rights": 1,
+     "is_central_legislation": 1, "has_criminal_provision": 0, "applicable_act": "Constitution",
+     "law_status": "upheld"},  # Kesavananda Bharati — Basic Structure
+    {"is_mandatory_sentence": 0, "allows_judicial_discretion": 1, "cites_fundamental_rights": 0,
+     "is_central_legislation": 1, "has_criminal_provision": 0, "applicable_act": "Companies Act",
+     "law_status": "upheld"},  # Companies Act 2013
+    {"is_mandatory_sentence": 0, "allows_judicial_discretion": 1, "cites_fundamental_rights": 0,
+     "is_central_legislation": 1, "has_criminal_provision": 0, "applicable_act": "Consumer Protection Act",
+     "law_status": "upheld"},  # Consumer Protection Act
+    {"is_mandatory_sentence": 0, "allows_judicial_discretion": 1, "cites_fundamental_rights": 0,
+     "is_central_legislation": 1, "has_criminal_provision": 0, "applicable_act": "Aadhaar Act",
+     "law_status": "upheld"},  # Aadhaar Act — partial validity
+    {"is_mandatory_sentence": 0, "allows_judicial_discretion": 1, "cites_fundamental_rights": 1,
+     "is_central_legislation": 1, "has_criminal_provision": 1, "applicable_act": "IPC",
+     "law_status": "upheld"},  # S.124A IPC — Sedition (stayed, treat as upheld)
+    {"is_mandatory_sentence": 0, "allows_judicial_discretion": 1, "cites_fundamental_rights": 0,
+     "is_central_legislation": 0, "has_criminal_provision": 0, "applicable_act": "State Act",
+     "law_status": "upheld"},  # State rent-control act
+    {"is_mandatory_sentence": 0, "allows_judicial_discretion": 1, "cites_fundamental_rights": 1,
+     "is_central_legislation": 1, "has_criminal_provision": 0, "applicable_act": "CAA",
+     "law_status": "upheld"},  # CAA challenges (under review, treat as upheld)
 ]
 
 
@@ -95,21 +93,21 @@ class DiceCounterfactualService:
     def __init__(self) -> None:
         df = pd.DataFrame(_SEED_DATA)
 
-        # dice-ml data object
+        # dice-ml data object — no continuous features
         self._dice_data = dice_ml.Data(
             dataframe=df,
             continuous_features=CONTINUOUS_FEATURES,
             outcome_name=OUTCOME_COL,
         )
 
-        # Train classifier
+        # Train classifier on one-hot encoded categoricals
         X = df.drop(columns=[OUTCOME_COL])
         y = df[OUTCOME_COL]
         self._model_clf = RandomForestClassifier(
             n_estimators=100, max_depth=6, random_state=42
         )
         self._model_clf.fit(
-            pd.get_dummies(X, columns=["court_level"]),
+            pd.get_dummies(X, columns=CATEGORICAL_FEATURES),
             y,
         )
 
@@ -125,12 +123,16 @@ class DiceCounterfactualService:
 
     def generate(self, case_features: Dict[str, Any], k: int = 3) -> Dict[str, Any]:
         """Generate k diverse counterfactuals for the given case features."""
-        # Build a single-row DataFrame
-        input_df = pd.DataFrame([case_features])
+        # Normalise booleans to int for the DataFrame
+        cleaned: Dict[str, Any] = {}
+        for feat in BOOLEAN_FEATURES:
+            cleaned[feat] = int(bool(case_features.get(feat, 0)))
+        cleaned["applicable_act"] = str(case_features.get("applicable_act", "IPC"))
+
+        input_df = pd.DataFrame([cleaned])
 
         # Predict original outcome
-        input_encoded = pd.get_dummies(input_df, columns=["court_level"])
-        # Align columns with training data
+        input_encoded = pd.get_dummies(input_df, columns=CATEGORICAL_FEATURES)
         for col in self._model_clf.feature_names_in_:
             if col not in input_encoded.columns:
                 input_encoded[col] = 0
@@ -147,7 +149,7 @@ class DiceCounterfactualService:
         except Exception as e:
             _logger.warning("DiCE generation failed: %s", e)
             return {
-                "original": {**case_features, "outcome": original_outcome},
+                "original": {**cleaned, "outcome": original_outcome},
                 "counterfactuals": [],
             }
 
@@ -158,7 +160,7 @@ class DiceCounterfactualService:
             cf_outcome = str(row.get(OUTCOME_COL, ""))
             changed = [
                 col for col in all_feature_cols
-                if str(cf_features.get(col)) != str(case_features.get(col))
+                if str(cf_features.get(col)) != str(cleaned.get(col))
             ]
             counterfactuals.append({
                 "features": cf_features,
@@ -167,7 +169,7 @@ class DiceCounterfactualService:
             })
 
         return {
-            "original": {**case_features, "outcome": original_outcome},
+            "original": {**cleaned, "outcome": original_outcome},
             "counterfactuals": counterfactuals,
         }
 
