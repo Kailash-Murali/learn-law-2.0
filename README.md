@@ -41,7 +41,6 @@ This system consists of six specialised agents and four XAI services working tog
 | **SHAP Confidence**       | `agents/shap_service.py`             | SHAP-based feature attribution for bad-law confidence scores   |
 | **DiCE Counterfactuals**  | `agents/dice_service.py`             | Diverse counterfactual explanations for classification queries |
 | **Attention Proxy**       | `agents/attention_proxy_service.py`  | TF-IDF cosine similarity for source-sentence attribution       |
-| **Surrogate Tree**        | `agents/surrogate_tree_service.py`   | Decision tree approximation of the validation logic            |
 
 ### Architecture
 
@@ -64,8 +63,7 @@ FastAPI Server (api_server.py)
         └─► XAI Endpoints (local scikit-learn services)
               ├─► /api/xai/confidence-breakdown  (SHAP)
               ├─► /api/xai/counterfactuals        (DiCE — classification queries only)
-              ├─► /api/xai/attention-map           (TF-IDF attention proxy)
-              └─► /api/xai/surrogate-tree          (Surrogate decision tree)
+              └─► /api/xai/attention-map           (TF-IDF attention proxy)
 ```
 
 ---
@@ -77,7 +75,7 @@ FastAPI Server (api_server.py)
 - **Real API Integrations**:
   - [Indian Kanoon](https://indiankanoon.org/) for Indian case law, statutes, and pending cases
   - [Springer Nature](https://dev.springernature.com/) for academic legal articles
-- **Four XAI Pipelines**: SHAP confidence breakdown, DiCE counterfactuals, attention-proxy source attribution, surrogate decision tree
+- **Three XAI Pipelines**: SHAP confidence breakdown, DiCE counterfactuals, attention-proxy source attribution
 - **Query-Type Routing**: Classification queries trigger DiCE; advisory queries trigger attention map (see XAI Logic Routing)
 - **Anti-Hallucination Validation**: Indian Kanoon cross-verification, bad-law detection, hallucination risk scoring
 - **Professional Documentation**: Executive summaries, legal analysis, legal drafts, and PDF/DOCX export
@@ -227,7 +225,6 @@ class Config:
 | POST   | `/api/xai/confidence-breakdown`  | SHAP feature attribution             |
 | POST   | `/api/xai/counterfactuals`       | DiCE diverse counterfactuals         |
 | POST   | `/api/xai/attention-map`         | TF-IDF sentence-source attribution   |
-| POST   | `/api/xai/surrogate-tree`        | Surrogate decision tree path         |
 
 ---
 
@@ -236,9 +233,7 @@ class Config:
 | Issue                                  | Solution                                                               |
 | -------------------------------------- | ---------------------------------------------------------------------- |
 | "API key not found"                    | Ensure `GROQ_API_KEY` is set in environment or `config.py`            |
-| 422 on `/api/xai/surrogate-tree`      | The endpoint now accepts both `validation_features` and `validation_data` |
 | SHAP "size-1 array" error              | Fixed — the SHAP extraction now handles 3-D ndarray from SHAP ≥ 0.41  |
-| "Could not load decision tree"         | Backend response is now transformed to the frontend-expected shape     |
 | DiCE fires with hardcoded features     | Fixed — features are now dynamically derived from the query context    |
 | Indian Kanoon rate limit               | Reduce request frequency; add delays between searches                  |
 | Springer empty results                 | Use simpler queries (2-3 keywords); check API plan constraints         |
@@ -266,8 +261,7 @@ learn-law-2.0/
 │   ├── drafting_agent.py       # Legal draft generation
 │   ├── shap_service.py         # SHAP confidence breakdown
 │   ├── dice_service.py         # DiCE counterfactual service
-│   ├── attention_proxy_service.py # TF-IDF attention proxy
-│   └── surrogate_tree_service.py  # Surrogate decision tree
+│   └── attention_proxy_service.py # TF-IDF attention proxy
 └── learn-law/                  # Next.js frontend
     ├── app/
     │   ├── page.tsx            # Main chat interface

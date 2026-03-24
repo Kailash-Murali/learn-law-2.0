@@ -26,7 +26,6 @@ from config import Config
 from agents.shap_service import get_shap_service
 from agents.dice_service import get_dice_service
 from agents.attention_proxy_service import compute_attention_map
-from agents.surrogate_tree_service import get_surrogate_service, FEATURE_NAMES as SURROGATE_FEATURE_NAMES
 from autogen_agent import extract_legal_features
 
 # ---------------------------------------------------------------------------
@@ -101,12 +100,6 @@ class CounterfactualRequest(BaseModel):
 class AttentionMapRequest(BaseModel):
     answer_sentences: List[str]
     citations: List[Dict[str, str]]
-
-
-class SurrogateTreeRequest(BaseModel):
-    user_query: str = Field("", max_length=5000)
-    validation_features: Optional[Dict[str, float]] = None
-    validation_data: Optional[Dict[str, Any]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -270,79 +263,6 @@ async def attention_map(body: AttentionMapRequest):
         for c in body.citations
     ]
     return compute_attention_map(body.answer_sentences, citation_texts)
-
-
-@app.post("/api/xai/surrogate-tree", tags=["xai"])
-async def surrogate_tree(body: SurrogateTreeRequest):
-    """Return surrogate decision tree built from LLM-extracted legal features."""
-    svc = get_surrogate_service()
-
-    # Extract legal features from user query (preferred), or fall back to validation_data
-    if body.user_query:
-        legal_features = extract_legal_features(body.user_query)
-    elif body.validation_data:
-        # Legacy path: derive boolean features heuristically from validation data
-        vd = body.validation_data
-        legal_features = {
-            "is_mandatory_sentence": False,
-            "allows_judicial_discretion": True,
-            "cites_fundamental_rights": bool(vd.get("article_refs")),
-            "is_central_legislation": bool(vd.get("statutes")),
-            "has_criminal_provision": False,
-        }
-    elif body.validation_features:
-        # Legacy path: map old float features to booleans
-        vf = body.validation_features
-        legal_features = {
-            "is_mandatory_sentence": False,
-            "allows_judicial_discretion": True,
-            "cites_fundamental_rights": vf.get("article_ref_count", 0) > 0,
-            "is_central_legislation": vf.get("statute_count", 0) > 0,
-            "has_criminal_provision": False,
-        }
-    else:
-        legal_features = {
-            "is_mandatory_sentence": False,
-            "allows_judicial_discretion": True,
-            "cites_fundamental_rights": False,
-            "is_central_legislation": False,
-            "has_criminal_provision": False,
-        }
-
-    raw = svc.build_from_query(legal_features)
-
-    # Transform nodes to frontend-expected shape
-    transformed_nodes = []
-    for node in raw.get("nodes", []):
-        if node["is_leaf"]:
-            label = node["value"]
-            node_type = "leaf"
-            prediction = (node["value"] == "Upheld")
-        else:
-            label = f"{node['feature']} \u2264 {node['threshold']}"
-            node_type = "decision"
-            prediction = None
-
-        children_ids = []
-        if node.get("children_left", -1) >= 0:
-            children_ids.append(node["children_left"])
-        if node.get("children_right", -1) >= 0:
-            children_ids.append(node["children_right"])
-
-        transformed_nodes.append({
-            "id": node["id"],
-            "label": label,
-            "type": node_type,
-            "prediction": prediction,
-            "children_ids": children_ids,
-        })
-
-    return {
-        "accuracy": raw.get("accuracy", 0.0),
-        "nodes": transformed_nodes,
-        "feature_names": list(SURROGATE_FEATURE_NAMES),
-        "prediction": raw.get("prediction"),
-    }
 
 
 # ---------------------------------------------------------------------------

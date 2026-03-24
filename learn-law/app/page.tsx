@@ -7,7 +7,6 @@ import { ChatInput } from "@/components/learn-law/chat-input"
 import { ValidationPanel, type ValidationData } from "@/components/learn-law/validation-panel"
 import { SpringerPapersPanel } from "@/components/learn-law/springer-papers-panel"
 import { ContrastivePanel } from "@/components/learn-law/contrastive-panel"
-import { CotPanel } from "@/components/learn-law/cot-panel"
 import { Scale, Copy, Check, ThumbsUp, ThumbsDown, Pencil, Download, FileDown } from "lucide-react"
 import { AboutPopover } from "@/components/learn-law/about-popover"
 import { SentenceHighlighter } from "@/components/learn-law/sentence-highlighter"
@@ -521,7 +520,7 @@ export default function Page() {
       </div>
 
       {/* ── Hero (landing) or Chat messages ── */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto scrollbar-page">
         {!isChat ? (
           /* Landing – hero + input centred together vertically */
           <section className="flex flex-col items-center justify-center min-h-[calc(100dvh-49px)] w-full px-4 sm:px-8">
@@ -622,12 +621,6 @@ export default function Page() {
                             data={msg.contrastive}
                             queryType={msg.queryType ?? "advisory"}
                             diceFeatures={msg.diceFeatures}
-                            userQuery={msg.userQuery ?? undefined}
-                          />
-                        )}
-                        {msg.uiPayload?.validation && (
-                          <CotPanel
-                            validation={msg.uiPayload.validation as Record<string, unknown>}
                             userQuery={msg.userQuery ?? undefined}
                           />
                         )}

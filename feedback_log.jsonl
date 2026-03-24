@@ -10,3 +10,4 @@
 {"query": "A couple married under the Special Marriage Act, 1954, wishes to file for divorce by mutual consent. They have currently been living separately for exactly 8 months. Can the family court legally accept their mutual consent petition today?", "issue": "", "vote": "up", "message_id": "1773209828409", "timestamp": "2026-03-11T06:17:36.091475"}
 {"query": "", "issue": "", "vote": "up", "message_id": "xai-feedback-dice_table-1773209887623", "timestamp": "2026-03-11T06:18:07.689456", "xai_feature_used": "dice_table", "user_rating": 5}
 {"query": "", "issue": "", "vote": "up", "message_id": "xai-feedback-attention_map-1773210030313", "timestamp": "2026-03-11T06:20:30.382982", "xai_feature_used": "attention_map", "user_rating": 5}
+{"query": "What is article 21?", "issue": "", "vote": "up", "message_id": "1773212498949", "timestamp": "2026-03-11T07:08:51.329675"}

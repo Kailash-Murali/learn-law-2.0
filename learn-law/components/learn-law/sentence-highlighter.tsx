@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, useMemo } from "react"
+import { useState, useCallback, useMemo, useEffect, useRef } from "react"
 import { cn } from "@/lib/utils"
 import {
   Sheet,
@@ -48,9 +48,58 @@ export function SentenceHighlighter({ text, citations, className }: SentenceHigh
   const [loading, setLoading] = useState(false)
   const [noCitations, setNoCitations] = useState(false)
   const [fetchError, setFetchError] = useState<string | null>(null)
+  const prefetchedRef = useRef(false)
   const { onOpen, onClose } = useXaiTelemetry("attention_map")
 
   const sentences = useMemo(() => splitSentences(text), [text])
+
+  const fetchAttentionMap = useCallback(() => {
+    if (!citations || citations.length === 0) {
+      setNoCitations(true)
+      return Promise.resolve()
+    }
+
+    setNoCitations(false)
+    setLoading(true)
+    return fetch("/api/xai/attention-map", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        answer_sentences: sentences,
+        citations: citations
+          .filter((c) => c.name)
+          .map((c) => ({ name: c.name, url: c.url ?? "", text: c.name })),
+      }),
+    })
+      .then((r) => {
+        if (!r.ok) throw new Error(`Server error (${r.status})`)
+        return r.json()
+      })
+      .then((data) => {
+        if (data?.sentence_source_map) setSentenceMap(data.sentence_source_map)
+      })
+      .catch((err) => {
+        setFetchError(err instanceof Error ? err.message : "Failed to load attribution data")
+      })
+      .finally(() => setLoading(false))
+  }, [citations, sentences])
+
+  useEffect(() => {
+    setSentenceMap(null)
+    setFetchError(null)
+    setNoCitations(false)
+    prefetchedRef.current = false
+  }, [text, citations])
+
+  useEffect(() => {
+    if (prefetchedRef.current) return
+    if (!citations || citations.length === 0) {
+      setNoCitations(true)
+      return
+    }
+    prefetchedRef.current = true
+    fetchAttentionMap()
+  }, [citations, fetchAttentionMap])
 
   const handleClick = useCallback(
     (sentence: string) => {
@@ -58,37 +107,9 @@ export function SentenceHighlighter({ text, citations, className }: SentenceHigh
       setDrawerOpen(true)
       setFetchError(null)
       onOpen()
-
-      if (!citations || citations.length === 0) {
-        setNoCitations(true)
-        return
-      }
-      setNoCitations(false)
-
-      setLoading(true)
-      fetch("/api/xai/attention-map", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          answer_sentences: sentences,
-          citations: citations
-            .filter((c) => c.name)
-            .map((c) => ({ name: c.name, url: c.url ?? "", text: c.name })),
-        }),
-      })
-        .then((r) => {
-          if (!r.ok) throw new Error(`Server error (${r.status})`)
-          return r.json()
-        })
-        .then((data) => {
-          if (data?.sentence_source_map) setSentenceMap(data.sentence_source_map)
-        })
-        .catch((err) => {
-          setFetchError(err instanceof Error ? err.message : "Failed to load attribution data")
-        })
-        .finally(() => setLoading(false))
+      if (!sentenceMap) fetchAttentionMap()
     },
-    [citations, sentences, onOpen],
+    [fetchAttentionMap, onOpen, sentenceMap],
   )
 
   const activeData = sentenceMap?.find((s) => s.sentence === activeSentence)
@@ -111,7 +132,7 @@ export function SentenceHighlighter({ text, citations, className }: SentenceHigh
       </span>
 
       <Sheet open={drawerOpen} onOpenChange={(v) => { setDrawerOpen(v); if (!v) onClose() }}>
-        <SheetContent side="right" className="w-full sm:max-w-lg bg-foreground text-background overflow-y-auto">
+        <SheetContent side="right" className="w-full sm:max-w-lg bg-foreground text-background overflow-y-auto scrollbar-compact">
           <SheetHeader>
             <SheetTitle className="text-background text-sm">Source Attribution</SheetTitle>
             <SheetDescription className="text-background/50 text-xs">

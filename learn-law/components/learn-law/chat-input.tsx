@@ -78,7 +78,7 @@ export function ChatInput({ onSend, isLoading = false }: ChatInputProps) {
         disabled={isLoading}
         rows={1}
         aria-label="Chat input"
-        className="w-full resize-none bg-transparent text-background placeholder:text-background/30 px-4 pt-2 pb-1 text-sm leading-relaxed outline-none min-h-[52px] max-h-[200px] disabled:opacity-40"
+        className="w-full resize-none bg-transparent text-background placeholder:text-background/30 px-4 pt-2 pb-1 text-sm leading-relaxed outline-none min-h-[52px] max-h-[200px] disabled:opacity-40 scrollbar-compact"
       />
 
       {/* ── Draft sub-menu (only when Draft mode is active) ── */}
